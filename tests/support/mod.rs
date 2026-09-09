@@ -98,7 +98,7 @@ impl Rng {
         lo + (self.next_u64() % (hi - lo) as u64) as u16
     }
 
-    pub fn pick<'a, T>(&mut self, items: &'a [T]) -> &'a T {
+    pub fn pick<'a, T: ?Sized>(&mut self, items: &'a [T]) -> &'a T {
         &items[self.below(items.len())]
     }
 
