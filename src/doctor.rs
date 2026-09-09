@@ -18,65 +18,62 @@ pub struct Check {
 }
 
 pub fn run(config: &Config, config_path: Option<&std::path::Path>, theme: &Theme) -> Vec<Check> {
-    // Annotated because the first push is inside a macOS-only block: without
-    // this the type is never inferred on any other platform.
+    // Annotated because the first push is inside a platform-specific block:
+    // without this the type is never inferred on some platforms.
     let mut checks: Vec<Check> = Vec::new();
 
-    // The path actually in use, timed. This is the one that matters.
+    // Where listening sockets actually come from on this machine, and what
+    // that costs. Reported on every platform, naming whichever source is live.
+    let started = Instant::now();
+    let mut source = crate::engine::Engine::socket_source();
+    let name = source.describe();
+    match source.listening() {
+        Ok(sockets) => checks.push(Check {
+            name: "sockets",
+            ok: true,
+            detail: format!(
+                "{} listening in {}ms via {name}",
+                sockets.len(),
+                started.elapsed().as_millis()
+            ),
+            fatal: false,
+        }),
+        Err(e) => checks.push(Check {
+            name: "sockets",
+            ok: false,
+            detail: format!("{name}: {e}"),
+            fatal: true,
+        }),
+    }
+
+    // The fallback, where there is a native path to fall back from.
     #[cfg(target_os = "macos")]
     {
         let started = Instant::now();
-        let mut native = crate::darwin::Native;
-        match native.listening() {
+        let mut lsof = crate::lsof::Lsof;
+        let native_ok = checks.iter().any(|c| c.name == "sockets" && c.ok);
+        match lsof.listening() {
             Ok(sockets) => checks.push(Check {
-                name: "sockets",
+                name: "lsof",
                 ok: true,
                 detail: format!(
-                    "{} listening in {}ms, straight from the kernel",
+                    "{} listening in {}ms (fallback, not in use)",
                     sockets.len(),
                     started.elapsed().as_millis()
                 ),
                 fatal: false,
             }),
             Err(e) => checks.push(Check {
-                name: "sockets",
-                ok: false,
-                detail: format!("native lookup unavailable ({e}); falling back to lsof"),
-                fatal: false,
+                name: "lsof",
+                ok: native_ok,
+                detail: if native_ok {
+                    format!("unavailable ({e}), but not needed")
+                } else {
+                    e.to_string()
+                },
+                fatal: !native_ok,
             }),
         }
-    }
-
-    // The fallback. Fatal only where there is no native path to fall back from.
-    let started = Instant::now();
-    let mut lsof = crate::lsof::Lsof;
-    let native_ok = checks.iter().any(|c| c.name == "sockets" && c.ok);
-    match lsof.listening() {
-        Ok(sockets) => checks.push(Check {
-            name: "lsof",
-            ok: true,
-            detail: format!(
-                "{} listening in {}ms (fallback{})",
-                sockets.len(),
-                started.elapsed().as_millis(),
-                if native_ok {
-                    ", not in use"
-                } else {
-                    ", in use"
-                }
-            ),
-            fatal: !native_ok,
-        }),
-        Err(e) => checks.push(Check {
-            name: "lsof",
-            ok: native_ok,
-            detail: if native_ok {
-                format!("unavailable ({e}), but not needed")
-            } else {
-                e.to_string()
-            },
-            fatal: !native_ok,
-        }),
     }
 
     // Everything else degrades rather than fails.

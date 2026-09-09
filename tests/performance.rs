@@ -63,13 +63,26 @@ fn enforced() -> bool {
     !cfg!(debug_assertions)
 }
 
+/// A shared CI runner measured two to four times slower than the machine these
+/// budgets were written on. Multiplying there keeps the guard meaningful — an
+/// order-of-magnitude regression still fails — without the build breaking
+/// because somebody else's job was busy on the same host.
+fn slack() -> u32 {
+    if std::env::var_os("CI").is_some() {
+        4
+    } else {
+        1
+    }
+}
+
 /// Assert a budget, in release only.
 #[track_caller]
 fn within(each: Duration, budget: Duration, what: &str) {
+    let budget = budget * slack();
     if enforced() {
-        assert!(each < budget, "{what} took {each:?}, budget {budget:?}");
+        assert!(each < budget, "{what}: {each:?}, budget {budget:?}");
     } else if each >= budget {
-        println!("  (debug build: {what} took {each:?}, over the {budget:?} release budget)");
+        println!("  (debug build: {what} at {each:?}, over the {budget:?} release budget)");
     }
 }
 
@@ -96,7 +109,7 @@ fn ingesting_a_scan_is_cheap() {
             app.ingest(servers.clone());
         });
         // Generous: this runs once every six seconds.
-        within(each, Duration::from_millis(4), "this");
+        within(each, Duration::from_millis(4), "ingesting a scan");
     }
 }
 
@@ -110,7 +123,7 @@ fn filtering_keeps_up_with_typing() {
         app.rebuild();
     });
     // A keystroke that takes longer than a frame is a keystroke you feel.
-    within(each, Duration::from_micros(600), "filtering took");
+    within(each, Duration::from_micros(600), "filtering");
 }
 
 /// A frame draws what is on screen, not what is on the machine. Handing the
@@ -149,7 +162,7 @@ fn a_frame_is_drawn_in_well_under_a_tick() {
         // The frame itself, not the test's conversion of it into text.
         let each = time(label, 200, || ui::render_frame(&mut app, 160, 50, 0));
         // The event loop ticks every 100ms; a frame must be a rounding error.
-        within(each, Duration::from_millis(2), "this");
+        within(each, Duration::from_millis(2), label);
     }
 }
 
@@ -170,11 +183,7 @@ fn applying_probe_results_is_cheap() {
     // Two thousand of these arrive within a couple of seconds of every scan.
     // This used to rebuild every group on every result, which was 188µs each —
     // 0.4 seconds of work per scan on a busy machine.
-    within(
-        each,
-        Duration::from_micros(2),
-        "a single health update took",
-    );
+    within(each, Duration::from_micros(2), "a single health update");
 }
 
 /// A probe that heard something re-identifies the service against the whole

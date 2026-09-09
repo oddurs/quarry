@@ -84,13 +84,15 @@ impl Engine {
     /// platform without the native path still has to work.
     pub fn live() -> Self {
         Self::new(
-            Self::best_socket_source(),
+            Self::socket_source(),
             Box::new(crate::procs::SysProcesses::new()),
             Box::new(crate::lsof::LsofCwds::default()),
         )
     }
 
-    fn best_socket_source() -> Box<dyn SocketSource> {
+    /// The socket source this machine will actually use. Public so `--doctor`
+    /// can report on the one that is live rather than guessing.
+    pub fn socket_source() -> Box<dyn SocketSource> {
         #[cfg(target_os = "macos")]
         {
             if crate::darwin::available() {
