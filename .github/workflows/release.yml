@@ -37,7 +37,6 @@ jobs:
         run: cargo build --release --locked --target ${{ matrix.target }}
 
       - name: Package
-        id: package
         shell: bash
         run: |
           version="${GITHUB_REF_NAME#v}"
@@ -47,8 +46,17 @@ jobs:
           cp "target/${{ matrix.target }}/release/quarry" "dist/$name/"
           cp README.md LICENSE SIGNATURES.md "dist/$name/"
           tar -czf "dist/$name.tar.gz" -C dist "$name"
-          shasum -a 256 "dist/$name.tar.gz" | awk '{print $1"  "'"'"$name.tar.gz"'"'"}' > "dist/$name.tar.gz.sha256"
-          echo "archive=dist/$name.tar.gz" >> "$GITHUB_OUTPUT"
+
+          # Hash from inside dist so the checksum file names the archive alone,
+          # which is what the installer greps for. macOS ships shasum, Linux
+          # ships sha256sum; both write "<hash>  <name>".
+          cd dist
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
+          else
+            shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
+          fi
+          cat "$name.tar.gz.sha256"
 
       - uses: actions/upload-artifact@v4
         with:
