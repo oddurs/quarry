@@ -66,9 +66,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # Read from Cargo.toml rather than pinned here, so the two cannot drift.
-      # The floor is set by dependencies — sysinfo is currently the highest —
-      # and `cargo metadata` will tell you which if this ever fails.
+      # Keep in step with rust-version in Cargo.toml. The floor is set by the
+      # dependencies rather than by quarry — sysinfo is currently the highest —
+      # and `cargo metadata` names the culprit if this ever fails.
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.95.0"
