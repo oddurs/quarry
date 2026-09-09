@@ -2,7 +2,7 @@
 name = "quarry"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.87"
+rust-version = "1.88"
 description = "See every server running on this machine, and whose project it came from"
 authors = ["Oddur Sigurdsson"]
 license = "MIT"
