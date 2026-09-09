@@ -73,4 +73,7 @@ jobs:
         with:
           toolchain: "1.95.0"
       - uses: Swatinem/rust-cache@v2
-      - run: cargo check --all-targets
+      # The library and the binary only. An MSRV is a promise about what
+      # somebody can build and install, not about compiling this repository's
+      # own test suite on an old toolchain.
+      - run: cargo check --lib --bins
