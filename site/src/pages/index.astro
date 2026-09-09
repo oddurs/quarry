@@ -5,7 +5,16 @@ import nightWide from "../tui/night-wide.html?raw";
 import nightNarrow from "../tui/night-narrow.html?raw";
 import paperWide from "../tui/paper-wide.html?raw";
 import paperNarrow from "../tui/paper-narrow.html?raw";
+import whyOutput from "../tui/why.txt?raw";
 import "../styles/site.css";
+
+// `quarry why 3000`, as the binary prints it. Split here so the winning line
+// and the also-rans can be told apart in the markup.
+const why = whyOutput.trimEnd().split("\n").map((line) => ({
+  text: line,
+  winner: line.startsWith("  →"),
+  aside: line.includes("port alone") || line.trimStart().startsWith("…"),
+}));
 
 const themes = [
   { id: "gotham", label: "Gotham", wide: gothamWide, narrow: gothamNarrow, bg: "#0a0f14", accent: "#edb54b" },
@@ -35,15 +44,6 @@ const install = [
   </head>
 
   <body>
-    <nav class="themes" aria-label="Colour theme">
-      {themes.map((t) => (
-        <button type="button" data-set-theme={t.id} aria-label={`Use the ${t.label} theme`} style={`--disc-bg:${t.bg};--disc-accent:${t.accent}`}>
-          <span class="disc"></span>
-          <span class="name">{t.label}</span>
-        </button>
-      ))}
-    </nav>
-
     <main>
       <header class="masthead">
         <h1>quarry</h1>
@@ -58,10 +58,58 @@ const install = [
           </div>
         ))}
         <figcaption>
-          quarry, as it draws itself. Not a screenshot: this page is built from the
-          tool's own renderer, so the two cannot drift apart.
+          <p>
+            quarry, as it draws itself — this is the tool's own renderer, not a
+            picture of it.
+          </p>
+          <nav class="themes" aria-label="Colour theme">
+            <span>It wears your terminal's colours. Try</span>
+            {themes.map((t) => (
+              <button type="button" data-set-theme={t.id} style={`--disc-bg:${t.bg};--disc-accent:${t.accent}`}>
+                <span class="disc"></span>
+                <span class="name">{t.label}</span>
+              </button>
+            ))}
+          </nav>
         </figcaption>
       </figure>
+
+      <section class="argument">
+        <h2>A port is a guess</h2>
+        <p>
+          Twenty-eight of the services quarry knows about claim port 3000. So it does
+          not decide by port. It scores evidence — what a service says when you
+          connect to it, the title on its own page, the program you actually
+          launched — and a port on its own carries a category, never a name.
+        </p>
+        <p class="ask">Ask it why, and it shows the whole ranking:</p>
+
+        <div class="why-frame"><pre class="why" aria-label="Output of quarry why 3000">{why.map((line) => (
+          <span class={[line.winner && "winner", line.aside && "aside"].filter(Boolean).join(" ")}>{line.text + "\n"}</span>
+        ))}</pre></div>
+      </section>
+
+      <section class="notes">
+        <article>
+          <h3>It finds all of them</h3>
+          <p>
+            Listening sockets come from the kernel directly, so a scan costs about
+            five milliseconds and needs nothing installed alongside it. Unix domain
+            sockets and bound UDP ports count too — on most machines there are
+            several hundred of those and a couple of dozen ports.
+          </p>
+        </article>
+        <article>
+          <h3>It knows whose they are</h3>
+          <p>
+            Each service is traced from its working directory back to the git
+            repository it came from. A container resolves through Compose to the
+            directory it was built in, so the container and the process land in one
+            group. Linked worktrees group under the repository they belong to, not
+            under their own folder name.
+          </p>
+        </article>
+      </section>
 
       <section class="install">
         <h2>Install it</h2>
@@ -78,36 +126,6 @@ const install = [
           Then run <code>quarry</code>. Arrow keys move, <code>↵</code> opens a service
           in your browser, <code>/</code> filters, <code>?</code> lists the rest.
         </p>
-      </section>
-
-      <section class="prose">
-        <article>
-          <h3>It finds all of them</h3>
-          <p>
-            Listening sockets come from the kernel directly, so a scan costs about five
-            milliseconds and needs nothing installed alongside it. Unix domain sockets and
-            bound UDP ports count too — on most machines there are several hundred of those
-            and a couple of dozen ports.
-          </p>
-        </article>
-        <article>
-          <h3>It knows what they are</h3>
-          <p>
-            Five hundred–odd signatures, scored on evidence: what a service says when you
-            connect to it, the title on its own page, the program you launched, the port it
-            sits on. A port alone is a guess about a category and never a name, which is why
-            <code>quarry why 3000</code> will show you the whole ranking.
-          </p>
-        </article>
-        <article>
-          <h3>It knows whose they are</h3>
-          <p>
-            Each service is traced from its working directory back to the git repository it
-            came from. A container resolves through Compose to the directory it was built in,
-            so the container and the process land in one group. Linked worktrees group under
-            the repository they belong to, not under their own folder name.
-          </p>
-        </article>
       </section>
 
       <footer>

@@ -65,7 +65,7 @@ html {
 
 body {
   margin: 0;
-  padding: 0 1.5rem 6rem;
+  padding: 2.75rem 1.5rem 4rem;
   background: var(--ground);
   color: var(--fg);
   font-family: Newsreader, Georgia, "Times New Roman", serif;
@@ -81,82 +81,72 @@ main {
   margin: 0 auto;
 }
 
-/* ── the theme switcher ─────────────────────────────────────────────────────
- * Three discs, each painted in its own theme's ground and accent. The control
- * shows you the thing it does. */
+/* ── the theme control ─────────────────────────────────────────────────────
+ * It sits under the terminal rather than in a corner, because its effect is
+ * visible there and a sentence can say what it is for. Each disc is painted in
+ * its own theme's ground and accent: the control shows you the thing it does. */
 
 .themes {
-  max-width: var(--measure);
-  margin: 0 auto;
-  padding: 1.75rem 0 0;
   display: flex;
-  justify-content: flex-end;
-  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.55rem;
+  color: var(--faint);
 }
+
+.themes > span { margin-right: 0.15rem; }
 
 .themes button {
   display: inline-flex;
   align-items: center;
-  gap: 0.45rem;
-  padding: 0.3rem 0.45rem;
-  border: 0;
+  gap: 0.4rem;
+  padding: 0.15rem 0.5rem 0.15rem 0.35rem;
+  border: 1px solid transparent;
   border-radius: 999px;
   background: none;
-  color: var(--faint);
+  color: var(--muted);
   font: inherit;
-  font-size: 0.8125rem;
-  letter-spacing: 0.01em;
+  font-size: inherit;
+  font-style: normal;
   cursor: pointer;
-  transition: color 180ms ease;
+  transition: color 180ms ease, border-color 180ms ease;
 }
 
 .themes .disc {
-  width: 0.72rem;
-  height: 0.72rem;
+  width: 0.7rem;
+  height: 0.7rem;
   border-radius: 50%;
   background: var(--disc-bg);
-  /* Two rings: the theme's own accent, and a neutral one so a disc whose
-   * ground matches the page is still visibly a disc. */
   box-shadow:
     inset 0 0 0 1px color-mix(in srgb, var(--disc-accent) 70%, transparent),
     0 0 0 1px var(--rule);
   position: relative;
-  transition: box-shadow 180ms ease;
 }
 
 .themes .disc::after {
   content: "";
   position: absolute;
-  inset: 27%;
+  inset: 26%;
   border-radius: 50%;
   background: var(--disc-accent);
   opacity: 0;
   transition: opacity 180ms ease;
 }
 
-.themes .name {
-  opacity: 0;
-  transition: opacity 180ms ease;
-}
-
-.themes button:hover .name,
-.themes button:focus-visible .name,
-.themes button[aria-pressed="true"] .name { opacity: 1; }
-
 .themes button:hover,
-.themes button[aria-pressed="true"] { color: var(--muted); }
+.themes button:focus-visible { color: var(--fg); border-color: var(--rule); }
+
+.themes button[aria-pressed="true"] {
+  color: var(--fg);
+  border-color: var(--rule);
+}
 
 .themes button[aria-pressed="true"] .disc::after { opacity: 1; }
 
-.themes button[aria-pressed="true"] .disc {
-  box-shadow:
-    inset 0 0 0 1px var(--disc-accent),
-    0 0 0 1px var(--muted);
-}
-
 /* ── masthead ───────────────────────────────────────────────────────────── */
 
-.masthead { padding: 3.5rem 0 2.75rem; }
+.masthead { padding: 0.5rem 0 2.75rem; }
 
 h1 {
   margin: 0;
@@ -179,7 +169,7 @@ h1 {
 
 /* ── the screen ─────────────────────────────────────────────────────────── */
 
-.screen { margin: 0 0 4.5rem; }
+.screen { margin: 0 0 4rem; }
 
 .frame {
   /* No border of our own: the terminal draws its own frame, and a second one
@@ -222,15 +212,19 @@ h1 {
 
 figcaption {
   margin-top: 1.1rem;
-  max-width: 54ch;
   font-size: 0.9375rem;
-  font-style: italic;
   color: var(--muted);
+}
+
+figcaption p {
+  margin: 0;
+  max-width: 54ch;
+  font-style: italic;
 }
 
 /* ── install ────────────────────────────────────────────────────────────── */
 
-.install { margin: 0 0 4.5rem; }
+.install { margin: 0 0 3.5rem; }
 
 h2,
 h3 {
@@ -296,31 +290,69 @@ code {
 
 .run code { color: var(--accent); }
 
-/* ── prose ──────────────────────────────────────────────────────────────── */
+/* ── the argument ───────────────────────────────────────────────────────────
+ * One claim, then the tool making it. This used to be three equal columns of
+ * prose, which said everything and showed nothing. */
 
-.prose {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 2.5rem;
-  margin: 0 0 4rem;
-}
+.argument { margin: 0 0 3.5rem; }
 
-.prose h3 {
-  font-size: 1.0625rem;
-  margin-bottom: 0.5rem;
-  color: var(--accent);
-  font-weight: 400;
-}
-
-.prose p {
-  margin: 0;
-  font-size: 1rem;
+.argument p {
+  max-width: 60ch;
+  margin: 0 0 1rem;
   color: var(--muted);
 }
 
-.prose code {
+.argument .ask {
+  margin-bottom: 1.35rem;
+  color: var(--faint);
+  font-style: italic;
+}
+
+/* Sized against its own box, like the terminal above it, so the evidence never
+ * has to be scrolled to be read. */
+.why-frame {
+  padding: 1.25rem 1.4rem;
+  background: var(--surface);
+  border-radius: 4px;
+  container-type: inline-size;
+}
+
+.why {
+  margin: 0;
+  /* The widest line is 86 characters at 0.6em of advance each, so it needs
+   * 51.6em; a little slack keeps a rounding error from clipping the end. */
+  font-size: min(0.8125rem, calc(100cqw / 53));
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  line-height: 1.7;
+  color: var(--muted);
+  white-space: pre;
+}
+
+.why .winner { color: var(--accent); }
+/* Dim, but still readable: these lines are the evidence for the claim, not
+ * decoration. */
+.why .aside { color: color-mix(in srgb, var(--muted) 68%, var(--faint)); }
+
+/* ── the two notes ──────────────────────────────────────────────────────── */
+
+.notes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3rem;
+  margin: 0 0 4rem;
+}
+
+.notes h3 {
+  font-size: 1.0625rem;
+  margin-bottom: 0.5rem;
   color: var(--fg);
-  font-size: 0.8125em;
+  font-weight: 400;
+}
+
+.notes p {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--muted);
 }
 
 /* ── footer ─────────────────────────────────────────────────────────────── */
@@ -359,7 +391,8 @@ footer a:focus-visible {
   .wide { display: none; }
   /* A phone is a narrow terminal, and quarry lays out for one. */
   .narrow { display: block; }
-  .prose { grid-template-columns: 1fr; gap: 2rem; }
+  .notes { grid-template-columns: 1fr; gap: 2rem; }
+  .why-frame { padding: 1rem; }
   .install li { grid-template-columns: 1fr auto; }
   .install .label { grid-column: 1 / -1; margin-bottom: -0.35rem; }
   .masthead { padding: 2.5rem 0 2rem; }

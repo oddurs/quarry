@@ -366,18 +366,23 @@ fn cmd_why(args: &[String]) -> Result<()> {
         std::process::exit(2);
     };
     let startup = resolve(args);
-    let mut engine = engine_for(&startup);
-    let report = match engine.scan() {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("quarry: {e}");
-            std::process::exit(1);
+    let servers = if args.iter().any(|a| a == "--demo") {
+        // The synthetic machine, so the explanation can be shown in the
+        // documentation without depending on what happens to be running.
+        quarry::testkit::demo()
+    } else {
+        let mut engine = engine_for(&startup);
+        match engine.scan() {
+            Ok(r) => r.servers,
+            Err(e) => {
+                eprintln!("quarry: {e}");
+                std::process::exit(1);
+            }
         }
     };
 
     let wanted = target.parse::<u16>().ok();
-    let found: Vec<_> = report
-        .servers
+    let found: Vec<_> = servers
         .iter()
         .filter(|s| match wanted {
             Some(port) => s.listeners.iter().any(|l| l.port == port),
@@ -414,19 +419,26 @@ fn cmd_why(args: &[String]) -> Result<()> {
             println!("  nothing in the signature table matched.");
             println!("  the kind came from the port conventions in src/model.rs.");
         }
-        for (i, v) in ranked.iter().take(8).enumerate() {
+        // A crowded port can be claimed by dozens of signatures, and listing
+        // them all buries the answer. The ones that scored, then a count.
+        const SHOWN: usize = 5;
+        for (i, v) in ranked.iter().take(SHOWN).enumerate() {
             let mark = if i == 0 { "→" } else { " " };
             let named = if v.names_the_service() {
                 ""
             } else {
-                "  (port only — not enough to name it)"
+                "  (port alone — not enough to name it)"
             };
             println!(
-                "  {mark} {:<28} {:>4}  {}{named}",
+                "  {mark} {:<26} {:>4}  {}{named}",
                 v.name,
                 v.score,
                 v.reasons.join(", ")
             );
+        }
+        if ranked.len() > SHOWN {
+            let rest = ranked.len() - SHOWN;
+            println!("    …and {rest} more matching the port alone");
         }
         println!();
     }

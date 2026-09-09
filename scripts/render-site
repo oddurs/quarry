@@ -19,4 +19,8 @@ for theme in gotham night paper; do
     > "$out/$theme-narrow.html"
 done
 
-echo "rendered $(ls "$out" | wc -l | tr -d ' ') frames into $out"
+# The tool explaining one of its own verdicts. Port 3000 is claimed by dozens of
+# signatures, which is exactly what makes it worth showing.
+./target/release/quarry why 3000 --demo > "$out/why.txt"
+
+echo "rendered $(ls "$out" | wc -l | tr -d ' ') files into $out"
