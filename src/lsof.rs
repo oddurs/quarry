@@ -20,13 +20,22 @@ pub struct Lsof;
 
 impl SocketSource for Lsof {
     fn listening(&mut self) -> Result<Vec<RawSocket>, SourceError> {
-        let out = exec::run(
+        match exec::run(
             "lsof",
             &["-nP", "-iTCP", "-sTCP:LISTEN", "-FpcLn"],
             LISTEN_TIMEOUT,
-        )
-        .map_err(to_source_error)?;
-        Ok(parse_listening(&out))
+        ) {
+            Ok(out) => Ok(parse_listening(&out)),
+            // `lsof` exits 1 when nothing matched, which is not a failure: a
+            // machine with nothing listening is a machine with nothing
+            // listening. Treating it as an error made quarry refuse to start
+            // inside a container.
+            Err(ExecError::Failed {
+                code: Some(1),
+                stderr,
+            }) if stderr.trim().is_empty() => Ok(Vec::new()),
+            Err(e) => Err(to_source_error(e)),
+        }
     }
 
     fn describe(&self) -> String {
@@ -251,6 +260,33 @@ mod tests {
         assert_eq!(map.len(), 2);
         assert_eq!(map[&1], PathBuf::from("/Users/x/code"));
         assert_eq!(map[&2], PathBuf::from("/tmp"), "first cwd wins");
+    }
+
+    /// `lsof` exits 1 when it matched nothing, and a machine with nothing
+    /// listening is not a broken machine. Reading that as a failure made
+    /// quarry refuse to start inside a container.
+    #[test]
+    fn finding_nothing_is_an_empty_list_not_a_failure() {
+        // The real thing, asked about a port range nothing can be using.
+        let out = exec::run(
+            "lsof",
+            &["-nP", "-iTCP:1", "-sTCP:LISTEN", "-FpcLn"],
+            LISTEN_TIMEOUT,
+        );
+        match out {
+            Ok(text) => assert!(parse_listening(&text).is_empty()),
+            Err(ExecError::Failed {
+                code: Some(1),
+                stderr,
+            }) => {
+                assert!(stderr.trim().is_empty(), "lsof complained: {stderr}");
+            }
+            Err(ExecError::Spawn(_)) => {} // no lsof here, which is allowed
+            Err(e) => panic!("unexpected: {e}"),
+        }
+        // And through the source, which is what the engine sees.
+        let found = Lsof.listening();
+        assert!(found.is_ok() || matches!(found, Err(ref e) if e.transient));
     }
 
     #[test]
