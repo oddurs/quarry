@@ -6,7 +6,6 @@ use std::time::{Duration, Instant};
 use crate::config::Config;
 use crate::engine::Engine;
 use crate::exec;
-use crate::source::SocketSource;
 use crate::theme::Theme;
 
 pub struct Check {
@@ -49,6 +48,10 @@ pub fn run(config: &Config, config_path: Option<&std::path::Path>, theme: &Theme
     // The fallback, where there is a native path to fall back from.
     #[cfg(target_os = "macos")]
     {
+        // Needed to call `listening` on the concrete `Lsof`; a trait object
+        // does not require it, which is why this is not at the top of the file.
+        use crate::source::SocketSource;
+
         let started = Instant::now();
         let mut lsof = crate::lsof::Lsof;
         let native_ok = checks.iter().any(|c| c.name == "sockets" && c.ok);
