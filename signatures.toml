@@ -1,0 +1,4490 @@
+# Service signatures.
+#
+# quarry identifies a listening socket by scoring evidence against this table.
+# The weights live in src/signature.rs: a banner outranks an HTTP title, which
+# outranks a Server header, which outranks a process name, which outranks a
+# port. Scores add, so a signature matching a port *and* a process name beats
+# one matching either alone — which is how two things on port 3000 are told
+# apart.
+#
+# A port is a convention, and a crowded one. An entry claiming a contested port
+# must carry something else that distinguishes it, or it will confidently
+# mislabel whatever else lands there.
+#
+# Your own services go in ~/.config/quarry/signatures.toml, in this format.
+# They are merged over this file and win ties. See SIGNATURES.md.
+
+
+# ─── web ───────────────────────────────────────────────────────────────
+
+# ─── web ─────────────────────────────────────────────────────────────
+
+[[signature]]
+name = "Angular CLI"
+kind = "web"
+ports = [4200]
+process = ["ng serve", "@angular/cli", "angular-cli"]
+uri = "http://localhost:{port}/"
+note = "Shares 4200 with Ember CLI; the process string is the only reliable separator."
+
+[[signature]]
+name = "Apache HTTP Server"
+kind = "web"
+ports = [80, 443, 8080]
+process = ["httpd", "apache2"]
+http_server = "Apache*"
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Apache Tomcat"
+kind = "web"
+ports = [8080, 8005, 8009]
+process = ["catalina", "tomcat", "org.apache.catalina.startup.bootstrap"]
+http_server = "Apache-Coyote*"
+note = "8005 is the shutdown listener and 8009 is AJP; neither speaks HTTP. Recent builds suppress the Coyote Server header."
+
+[[signature]]
+name = "Astro"
+kind = "web"
+ports = [4321]
+process = ["astro"]
+
+[[signature]]
+name = "Audiobookshelf"
+kind = "web"
+ports = [13378]
+process = ["audiobookshelf"]
+http_title = "Audiobookshelf*"
+
+[[signature]]
+name = "Bokeh server"
+kind = "web"
+ports = [5006]
+process = ["bokeh serve", "panel serve"]
+http_server = "TornadoServer*"
+uri = "http://localhost:{port}/"
+note = "Panel serves on the same Bokeh/Tornado stack and the same default port."
+
+[[signature]]
+name = "Caddy"
+kind = "web"
+ports = [80, 443, 2019]
+process = ["caddy"]
+http_server = "Caddy*"
+uri = "http://localhost:{port}/"
+note = "2019 is the local admin API (config read and write, unauthenticated by default)."
+
+[[signature]]
+name = "Calibre-Web"
+kind = "web"
+ports = [8083]
+process = ["calibre-web", "cps.py"]
+
+[[signature]]
+name = "cargo-leptos"
+kind = "web"
+ports = [3000, 3001]
+process = ["cargo-leptos", "cargo leptos"]
+note = "3000 serves the site, 3001 is the live-reload socket."
+
+[[signature]]
+name = "create-react-app"
+kind = "web"
+ports = [3000]
+process = ["react-scripts"]
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Daphne"
+kind = "web"
+ports = [8000]
+process = ["daphne"]
+uri = "http://localhost:{port}/"
+note = "The ASGI server for Django Channels; often the WebSocket half of a Django project."
+
+[[signature]]
+name = "Dash"
+kind = "web"
+ports = [8050]
+process = ["dash"]
+http_server = "Werkzeug*"
+uri = "http://localhost:{port}/"
+note = "Dash runs on Flask, so it looks like Werkzeug on the wire — 8050 rather than 5000 is what separates it."
+
+[[signature]]
+name = "Django development server"
+kind = "web"
+ports = [8000]
+process = ["manage.py runserver", "django-admin runserver", "runserver"]
+http_server = "WSGIServer*"
+uri = "http://localhost:{port}/"
+note = "Only `manage.py runserver` sends the WSGIServer header; a Django app behind gunicorn or uvicorn will not."
+
+[[signature]]
+name = "Docusaurus"
+kind = "web"
+ports = [3000]
+process = ["docusaurus"]
+uri = "http://localhost:{port}/"
+note = "Emits a `<meta name=\"generator\" content=\"Docusaurus vX\">` tag, which is a stronger tell than the title."
+
+[[signature]]
+name = "Eleventy"
+kind = "web"
+ports = [8080]
+process = ["eleventy"]
+uri = "http://localhost:{port}/"
+note = "The Eleventy Dev Server; shares 8080 with webpack-dev-server and http-server."
+
+[[signature]]
+name = "Ember CLI"
+kind = "web"
+ports = [4200]
+process = ["ember-cli", "ember serve"]
+uri = "http://localhost:{port}/"
+note = "Shares 4200 with `ng serve`."
+
+[[signature]]
+name = "Emby Server"
+kind = "web"
+ports = [8096, 8920]
+process = ["embyserver", "emby-server"]
+http_title = "Emby*"
+note = "Shares 8096 with Jellyfin, which forked from it; only the process name or page title separates them."
+
+[[signature]]
+name = "Flask (Werkzeug dev server)"
+kind = "web"
+ports = [5000]
+process = ["flask run", "flask", "werkzeug"]
+http_server = "Werkzeug*"
+uri = "http://localhost:{port}/"
+note = "On macOS port 5000 is also taken by the AirPlay Receiver; the Werkzeug Server header is the reliable tell."
+
+[[signature]]
+name = "Frigate"
+kind = "web"
+ports = [8971, 5000]
+process = ["frigate"]
+http_title = "Frigate*"
+note = "8971 is the authenticated UI added in 0.14; 5000 remains an unauthenticated internal port, and older deployments front 5000 only."
+
+[[signature]]
+name = "Gatsby"
+kind = "web"
+ports = [8000, 9000]
+process = ["gatsby"]
+note = "8000 is `gatsby develop` (GraphiQL lives at /___graphql), 9000 is `gatsby serve`."
+
+[[signature]]
+name = "Gradio"
+kind = "web"
+ports = [7860]
+process = ["gradio"]
+uri = "http://localhost:{port}/"
+note = "Apps launched from a script show up as a plain `python` process, so port 7860 is often the only signal — and it is shared with every other Gradio app."
+
+[[signature]]
+name = "Gunicorn"
+kind = "web"
+ports = [8000]
+process = ["gunicorn"]
+http_server = "gunicorn*"
+uri = "http://localhost:{port}/"
+note = "The default bind is 127.0.0.1:8000; workers may be sync WSGI or uvicorn ASGI, so the app behind it can be anything Python."
+
+[[signature]]
+name = "Home Assistant"
+kind = "web"
+ports = [8123]
+process = ["homeassistant", "hass"]
+http_title = "Home Assistant*"
+uri = "http://localhost:{port}/"
+note = "Shares 8123 with the ClickHouse HTTP interface. /api/ requires a bearer token, so there is no unauthenticated health path."
+
+[[signature]]
+name = "http-server"
+kind = "web"
+ports = [8080]
+process = ["http-server"]
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Hugo"
+kind = "web"
+ports = [1313]
+process = ["hugo"]
+
+[[signature]]
+name = "Hypercorn"
+kind = "web"
+ports = [8000]
+process = ["hypercorn"]
+http_server = "hypercorn*"
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Immich"
+kind = "web"
+ports = [2283]
+process = ["immich"]
+http_title = "Immich*"
+health = "/api/server/ping"
+note = "Older deployments used 3001 for the server and 2283 only for the proxy."
+
+[[signature]]
+name = "Ionic CLI"
+kind = "web"
+ports = [8100]
+process = ["ionic serve", "@ionic/cli"]
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Jekyll"
+kind = "web"
+ports = [4000]
+process = ["jekyll"]
+
+[[signature]]
+name = "Jellyfin"
+kind = "web"
+ports = [8096, 8920]
+process = ["jellyfin"]
+http_title = "Jellyfin*"
+health = "/health"
+
+[[signature]]
+name = "Jetty"
+kind = "web"
+ports = [8080]
+process = ["org.eclipse.jetty", "jetty"]
+http_server = "Jetty*"
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Kestrel (ASP.NET Core)"
+kind = "web"
+ports = [5000, 5001]
+process = ["kestrel", "dotnet"]
+http_server = "Kestrel*"
+uri = "http://localhost:{port}/"
+note = "5000/5001 are the classic template defaults with 5001 HTTPS; newer templates assign random 5000-range ports in launchSettings.json. The Kestrel Server header separates it from Flask on 5000."
+
+[[signature]]
+name = "Kodi"
+kind = "web"
+ports = [8080]
+process = ["kodi"]
+note = "Only listening when the built-in web server is enabled; 9090 carries the JSON-RPC websocket."
+
+[[signature]]
+name = "Ktor"
+kind = "web"
+ports = [8080]
+process = ["io.ktor", "ktor"]
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Laravel (artisan serve)"
+kind = "web"
+ports = [8000]
+process = ["artisan serve"]
+http_server = "PHP*Development Server*"
+uri = "http://localhost:{port}/"
+note = "Wraps `php -S`, so it is indistinguishable from the built-in server except by argv."
+
+[[signature]]
+name = "lighttpd"
+kind = "web"
+ports = [80, 443]
+process = ["lighttpd"]
+http_server = "lighttpd*"
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Litestar"
+kind = "web"
+ports = [8000]
+process = ["litestar run", "litestar"]
+uri = "http://localhost:{port}/"
+note = "`litestar run` wraps uvicorn, so the Server header usually reads uvicorn."
+
+[[signature]]
+name = "live-server"
+kind = "web"
+ports = [8080]
+process = ["live-server"]
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Micronaut"
+kind = "web"
+ports = [8080]
+process = ["io.micronaut", "micronaut"]
+health = "/health"
+uri = "http://localhost:{port}/"
+note = "/health requires the management dependency; a configured port of -1 means Micronaut picked a random one."
+
+[[signature]]
+name = "Navidrome"
+kind = "web"
+ports = [4533]
+process = ["navidrome"]
+http_title = "Navidrome*"
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Netlify CLI"
+kind = "web"
+ports = [8888]
+process = ["netlify dev", "netlify-cli", "netlify"]
+uri = "http://localhost:{port}/"
+note = "Proxies the framework's own dev server, which is still listening separately on its usual port."
+
+[[signature]]
+name = "Next.js"
+kind = "web"
+process = ["next-server", "next dev", "next start"]
+
+[[signature]]
+name = "nginx"
+kind = "web"
+ports = [80, 443, 8080]
+process = ["nginx"]
+http_server = "nginx*"
+uri = "http://localhost:{port}/"
+note = "Homebrew's nginx defaults to 8080, not 80; worker processes share the argv prefix with the master."
+
+[[signature]]
+name = "Nuxt"
+kind = "web"
+ports = [3000]
+process = ["nuxt", "nuxi", "nitro"]
+uri = "http://localhost:{port}/"
+note = "Dev, `nuxt preview` and the built Nitro server all default to 3000."
+
+[[signature]]
+name = "openHAB"
+kind = "web"
+ports = [8080, 8443]
+process = ["openhab"]
+http_title = "openHAB*"
+
+[[signature]]
+name = "OpenResty"
+kind = "web"
+ports = [80, 443, 8080]
+process = ["openresty", "nginx"]
+http_server = "openresty*"
+uri = "http://localhost:{port}/"
+note = "Reports itself as openresty rather than nginx; the process name is often plain nginx."
+
+[[signature]]
+name = "Parcel"
+kind = "web"
+ports = [1234]
+process = ["parcel"]
+uri = "http://localhost:{port}/"
+note = "Shares 1234 with LM Studio's API server."
+
+[[signature]]
+name = "Phoenix"
+kind = "web"
+ports = [4000]
+process = ["phx.server", "beam.smp", "elixir"]
+uri = "http://localhost:{port}/"
+note = "4000 is the generated dev config and 4001 the HTTPS/test endpoint. Phoenix 1.7+ serves through Bandit, older projects through Cowboy; LiveDashboard is normally mounted at /dashboard in dev."
+
+[[signature]]
+name = "PhotoPrism"
+kind = "web"
+ports = [2342]
+process = ["photoprism"]
+http_title = "PhotoPrism*"
+
+[[signature]]
+name = "PHP built-in server"
+kind = "web"
+ports = [8000]
+process = ["php -s"]
+http_server = "PHP*Development Server*"
+uri = "http://localhost:{port}/"
+note = "`php -S` has no default port — 8000 is only convention — but the Server header names it exactly."
+
+[[signature]]
+name = "PHP-FPM"
+kind = "web"
+ports = [9000]
+process = ["php-fpm"]
+uri = "fastcgi://localhost:{port}"
+note = "Speaks FastCGI, not HTTP, so an HTTP probe gets nothing useful. Many distributions ship it on a unix socket instead of TCP 9000."
+
+[[signature]]
+name = "Play Framework"
+kind = "web"
+ports = [9000]
+process = ["play.core.server", "playframework"]
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Plex Media Server"
+kind = "web"
+ports = [32400]
+process = ["plex media server"]
+health = "/identity"
+note = "/identity answers without a token, which makes it a safe unauthenticated probe."
+
+[[signature]]
+name = "Puma"
+kind = "web"
+ports = [9292, 3000]
+process = ["puma"]
+uri = "http://localhost:{port}/"
+note = "9292 is the Rack default when run standalone; under Rails it inherits 3000."
+
+[[signature]]
+name = "Pyramid (pserve)"
+kind = "web"
+ports = [6543]
+process = ["pserve"]
+http_server = "waitress*"
+uri = "http://localhost:{port}/"
+note = "6543 comes from the Pyramid project templates, and pserve normally runs waitress underneath. Supavisor uses the same port."
+
+[[signature]]
+name = "Python http.server"
+kind = "web"
+ports = [8000]
+process = ["http.server"]
+http_server = "SimpleHTTP/*"
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Quarkus"
+kind = "web"
+ports = [8080]
+process = ["quarkus:dev", "quarkus", "io.quarkus"]
+health = "/q/health"
+uri = "http://localhost:{port}/"
+note = "Dev mode also serves the Dev UI at /q/dev and opens a JDWP listener on 5005."
+
+[[signature]]
+name = "React Router"
+kind = "web"
+ports = [5173, 3000]
+process = ["react-router dev", "react-router-serve"]
+uri = "http://localhost:{port}/"
+note = "v7 framework mode: dev runs through Vite on 5173, `react-router-serve` on 3000."
+
+[[signature]]
+name = "Redwood"
+kind = "web"
+ports = [8910, 8911]
+process = ["redwood", "rw dev"]
+note = "8910 is the web side, 8911 the API side; the GraphQL endpoint is /graphql on 8911."
+
+[[signature]]
+name = "Remix"
+kind = "web"
+ports = [5173, 3000]
+process = ["remix-serve", "remix vite:dev", "remix dev"]
+uri = "http://localhost:{port}/"
+note = "Vite-based dev is 5173; `remix-serve` in production is 3000."
+
+[[signature]]
+name = "Rsbuild"
+kind = "web"
+ports = [3000]
+process = ["rsbuild"]
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Rspack"
+kind = "web"
+ports = [8080]
+process = ["rspack serve", "rspack-cli"]
+uri = "http://localhost:{port}/"
+note = "rspack-cli inherits the webpack-dev-server default of 8080; Rsbuild, built on the same core, uses 3000 instead."
+
+[[signature]]
+name = "Rspress"
+kind = "web"
+ports = [3000]
+process = ["rspress"]
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Ruby on Rails"
+kind = "web"
+ports = [3000]
+process = ["rails server", "bin/rails", "rails s"]
+uri = "http://localhost:{port}/"
+note = "Port 3000 is heavily contested; the rails/puma argv is what distinguishes it from a Node dev server."
+
+[[signature]]
+name = "Sanic"
+kind = "web"
+ports = [8000]
+process = ["sanic"]
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Sanity Studio"
+kind = "web"
+ports = [3333]
+process = ["sanity dev", "@sanity/cli"]
+uri = "http://localhost:{port}/"
+note = "Shares 3333 with the Stencil dev server."
+
+[[signature]]
+name = "Scrypted"
+kind = "web"
+ports = [10443]
+process = ["scrypted"]
+note = "HTTPS with a self-signed certificate by default."
+
+[[signature]]
+name = "serve"
+kind = "web"
+ports = [3000]
+process = ["serve"]
+uri = "http://localhost:{port}/"
+note = "A static file server; `serve` is a short substring, so require a word boundary in argv."
+
+[[signature]]
+name = "Sinatra"
+kind = "web"
+ports = [4567]
+process = ["sinatra"]
+uri = "http://localhost:{port}/"
+note = "4567 is the classic-style default and collides with Galera's group communication port; a Sinatra app run through rackup uses 9292 instead."
+
+[[signature]]
+name = "Slidev"
+kind = "web"
+ports = [3030]
+process = ["slidev"]
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "SolidStart"
+kind = "web"
+ports = [3000]
+process = ["vinxi", "solid-start"]
+uri = "http://localhost:{port}/"
+note = "Vinxi also backs TanStack Start, so argv may show only `vinxi`."
+
+[[signature]]
+name = "Spring Boot"
+kind = "web"
+ports = [8080]
+process = ["org.springframework.boot", "spring-boot:run", "bootrun"]
+health = "/actuator/health"
+uri = "http://localhost:{port}/"
+note = "/actuator/health only answers when the actuator dependency is present; the embedded server is Tomcat by default, Jetty or Undertow if swapped."
+
+[[signature]]
+name = "Stencil"
+kind = "web"
+ports = [3333]
+process = ["stencil"]
+uri = "http://localhost:{port}/"
+note = "Shares 3333 with `sanity dev`."
+
+[[signature]]
+name = "Streamlit"
+kind = "web"
+ports = [8501]
+process = ["streamlit"]
+http_title = "Streamlit*"
+health = "/_stcore/health"
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "SvelteKit"
+kind = "web"
+ports = [5173, 4173]
+process = ["svelte-kit", "sveltekit"]
+uri = "http://localhost:{port}/"
+note = "Runs on Vite, so argv often shows only `vite`; the SvelteKit-specific string appears in the child process."
+
+[[signature]]
+name = "Symfony local server"
+kind = "web"
+ports = [8000]
+process = ["symfony serve", "symfony server:start"]
+uri = "https://localhost:{port}/"
+note = "Serves HTTPS when a local CA is installed, and steps to 8001, 8002, … if 8000 is taken."
+
+[[signature]]
+name = "Tornado"
+kind = "web"
+process = ["tornado"]
+http_server = "TornadoServer*"
+note = "Tornado has no default port — the application picks one — so identify it by the TornadoServer header rather than by port."
+
+[[signature]]
+name = "Trunk"
+kind = "web"
+ports = [8080]
+process = ["trunk"]
+uri = "http://localhost:{port}/"
+note = "A Rust/WASM dev server with live reload; the reload WebSocket rides on the same port."
+
+[[signature]]
+name = "Unicorn"
+kind = "web"
+ports = [8080]
+process = ["unicorn", "unicorn_rails"]
+uri = "http://localhost:{port}/"
+note = "Master and worker processes share the argv prefix, so several matches for one listener is normal."
+
+[[signature]]
+name = "UniFi Network Application"
+kind = "web"
+ports = [8443, 8080]
+process = ["unifi"]
+note = "8443 is the HTTPS UI, 8080 the device inform endpoint; it runs in a JVM, so argv is a java command line."
+
+[[signature]]
+name = "Uvicorn"
+kind = "web"
+ports = [8000]
+process = ["uvicorn"]
+http_server = "uvicorn*"
+uri = "http://localhost:{port}/"
+note = "The usual host for FastAPI; interactive docs are normally at /docs and the OpenAPI schema at /openapi.json."
+
+[[signature]]
+name = "Vercel CLI"
+kind = "web"
+ports = [3000]
+process = ["vercel dev", "vercel-cli"]
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Vite"
+kind = "web"
+ports = [5173, 5174]
+process = ["vite"]
+
+[[signature]]
+name = "Vite Preview"
+kind = "web"
+ports = [4173]
+process = ["vite preview"]
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "VitePress"
+kind = "web"
+ports = [5173]
+process = ["vitepress"]
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Vue CLI"
+kind = "web"
+ports = [8080]
+process = ["vue-cli-service"]
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Waitress"
+kind = "web"
+ports = [8080]
+process = ["waitress-serve", "waitress"]
+http_server = "waitress*"
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "webpack-dev-server"
+kind = "web"
+ports = [8080]
+process = ["webpack-dev-server", "webpack serve"]
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "WEBrick"
+kind = "web"
+process = ["webrick"]
+http_server = "WEBrick*"
+note = "No dependable default port — it takes whatever the embedding script passes — but it always announces itself in the Server header."
+
+[[signature]]
+name = "Wrangler"
+kind = "web"
+ports = [8787]
+process = ["wrangler", "workerd"]
+uri = "http://localhost:{port}/"
+note = "`wrangler dev` also opens a V8 inspector on 9229 alongside the worker. Shares 8787 with RStudio Server and Readarr."
+
+
+# ─── api ─────────────────────────────────────────────────────────────
+
+[[signature]]
+name = "Confluent REST Proxy"
+kind = "api"
+ports = [8082]
+process = ["kafkarestapplication", "kafka-rest-start"]
+uri = "http://localhost:{port}/topics"
+
+[[signature]]
+name = "Django"
+kind = "api"
+ports = [8000]
+process = ["manage.py runserver", "django"]
+
+[[signature]]
+name = "Flask"
+kind = "api"
+process = ["flask"]
+
+[[signature]]
+name = "json-server"
+kind = "api"
+ports = [3000]
+process = ["json-server"]
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Rails"
+kind = "api"
+ports = [3000]
+process = ["puma", "rails s", "rails server"]
+
+[[signature]]
+name = "Supabase API"
+kind = "api"
+ports = [54321]
+process = ["supabase", "kong"]
+uri = "http://localhost:{port}/"
+note = "Local CLI stack; the bundled Postgres sits on 54322."
+
+[[signature]]
+name = "Supabase API Gateway"
+kind = "api"
+ports = [54321]
+process = ["supabase", "kong"]
+http_server = "kong*"
+uri = "http://localhost:{port}/"
+note = "supabase start fronts every local service behind Kong on 54321; /rest/v1, /auth/v1 and /storage/v1 route from there. The bundled Postgres sits on 54322."
+
+
+# ─── db ──────────────────────────────────────────────────────────────
+
+[[signature]]
+name = "Aerospike"
+kind = "db"
+ports = [3000, 3001, 3002, 3003]
+process = ["aerospike", "asd"]
+note = "3000 client service, 3001 fabric, 3002 heartbeat, 3003 info. The daemon binary is asd, a short substring — prefer a path match on /aerospike/ where argv gives one."
+
+[[signature]]
+name = "Apache Cassandra"
+kind = "db"
+ports = [9042]
+process = ["cassandra"]
+note = "9042 is the CQL native transport. Internode (7000/7001) and JMX (7199) are also opened but are too widely shared to claim."
+
+[[signature]]
+name = "Apache CouchDB"
+kind = "db"
+ports = [5984, 6984]
+process = ["couchdb"]
+http_server = "CouchDB*"
+health = "/_up"
+uri = "http://localhost:{port}/_utils/"
+note = "Runs on the Erlang VM, so argv often shows beam.smp with couchdb only in the path. 6984 is the TLS listener."
+
+[[signature]]
+name = "ArangoDB"
+kind = "db"
+ports = [8529]
+process = ["arangod"]
+http_server = "ArangoDB*"
+health = "/_admin/server/availability"
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "ClickHouse"
+kind = "db"
+ports = [8123, 9000, 9004, 9005]
+process = ["clickhouse-server", "clickhouse"]
+health = "/ping"
+note = "8123 HTTP, 9000 native TCP, 9004 MySQL-compatible, 9005 PostgreSQL-compatible. GET / on 8123 returns the plain text 'Ok.' with no HTML title."
+
+[[signature]]
+name = "CockroachDB"
+kind = "db"
+ports = [26257]
+process = ["cockroach"]
+uri = "postgresql://root@localhost:{port}/defaultdb?sslmode=disable"
+probe = "postgres"
+note = "Speaks the PostgreSQL wire protocol on 26257; the DB Console is a separate HTTP listener that defaults to 8080."
+
+[[signature]]
+name = "Couchbase Server"
+kind = "db"
+ports = [8091, 8092, 8093, 8094, 11210]
+process = ["couchbase"]
+note = "8091 admin console, 8092 views, 8093 N1QL query, 8094 search, 11210 KV binary protocol. It ships its own memcached binary, so argv shows memcached under a couchbase path and its 11211 listener can look like plain Memcached."
+
+[[signature]]
+name = "Dgraph"
+kind = "db"
+ports = [8080, 9080, 6080, 5080]
+process = ["dgraph"]
+health = "/health"
+note = "Alpha: 8080 HTTP, 9080 gRPC. Zero: 6080 HTTP admin, 5080 gRPC. Both binaries are named dgraph, so the port picks the role."
+
+[[signature]]
+name = "etcd"
+kind = "db"
+ports = [2379, 2380]
+process = ["etcd"]
+health = "/health"
+note = "2379 client API, 2380 peer. Kubernetes control planes and TiDB's PD both occupy these ports too."
+
+[[signature]]
+name = "FoundationDB"
+kind = "db"
+ports = [4500]
+process = ["fdbserver", "fdbmonitor"]
+note = "Additional processes on one host take 4501, 4502, … sequentially. Connection details come from fdb.cluster, not a URI."
+
+[[signature]]
+name = "Galera Cluster"
+kind = "db"
+ports = [4567, 4568, 4444]
+process = ["garbd", "mariadbd", "mysqld"]
+note = "Replication transport for MariaDB Galera and Percona XtraDB Cluster: 4567 group communication, 4568 IST, 4444 SST. These are not SQL ports and will not answer a MySQL handshake."
+
+[[signature]]
+name = "Gel"
+kind = "db"
+ports = [5656]
+process = ["gel-server", "edgedb-server"]
+uri = "gel://localhost:{port}"
+note = "Formerly EdgeDB; older installs still run edgedb-server on the same port and answer gel:// as edgedb://."
+
+[[signature]]
+name = "InfluxDB"
+kind = "db"
+ports = [8086, 8181]
+process = ["influxd", "influxdb3"]
+http_title = "InfluxDB*"
+health = "/health"
+uri = "http://localhost:{port}/"
+note = "8086 is v1/v2; InfluxDB 3 Core and Enterprise default to 8181. v1 answers /ping rather than /health."
+
+[[signature]]
+name = "libSQL server"
+kind = "db"
+ports = [8080]
+process = ["sqld", "libsql-server"]
+health = "/health"
+uri = "http://localhost:{port}"
+note = "SQLite over HTTP/Hrana rather than a binary SQL port; 8080 is heavily shared, so the sqld process name is what identifies it."
+
+[[signature]]
+name = "MariaDB"
+kind = "db"
+ports = [3306]
+process = ["mariadbd", "mariadbd-safe", "mysqld"]
+uri = "mysql://root@localhost:{port}/"
+probe = "mysql"
+note = "Process is mariadbd on 10.5+ but still mysqld on older builds; the handshake version string reads 5.5.5-<real version>-MariaDB for legacy client compatibility."
+
+[[signature]]
+name = "Memgraph"
+kind = "db"
+ports = [7687]
+process = ["memgraph"]
+uri = "bolt://localhost:{port}"
+note = "Speaks Bolt on 7687 exactly like Neo4j; only the process name separates them."
+
+[[signature]]
+name = "Microsoft SQL Server"
+kind = "db"
+ports = [1433]
+process = ["sqlservr"]
+uri = "sqlserver://localhost:{port}"
+note = "TDS: the client sends PRELOGIN first, so nothing arrives unprompted. The SQL Server Browser on 1434 is UDP only."
+
+[[signature]]
+name = "MongoDB"
+kind = "db"
+ports = [27017, 27018, 27019]
+process = ["mongod"]
+uri = "mongodb://localhost:{port}"
+probe = "mongodb"
+
+[[signature]]
+name = "MySQL"
+kind = "db"
+ports = [3306, 3307]
+process = ["mysqld", "mariadbd"]
+uri = "mysql://localhost:{port}"
+probe = "mysql"
+
+[[signature]]
+name = "Neo4j"
+kind = "db"
+ports = [7687, 7474, 7473]
+process = ["neo4j"]
+http_title = "Neo4j Browser*"
+note = "7687 Bolt, 7474 HTTP browser, 7473 HTTPS. Bolt is client-first: the client sends the 0x6060B017 magic before the server replies."
+
+[[signature]]
+name = "Oracle Database Free"
+kind = "db"
+ports = [1521]
+process = ["tnslsnr", "ora_pmon"]
+uri = "oracle://localhost:{port}/FREEPDB1"
+note = "Successor to Oracle XE; the listener process is tnslsnr and the pluggable database service name is FREEPDB1 on 23ai, XEPDB1 on 18c/21c XE."
+
+[[signature]]
+name = "PD (TiDB Placement Driver)"
+kind = "db"
+ports = [2379, 2380]
+process = ["pd-server"]
+note = "Embeds etcd and therefore takes etcd's 2379/2380. Only the pd-server argv distinguishes it from a plain etcd."
+
+[[signature]]
+name = "PostgreSQL"
+kind = "db"
+ports = [5432, 5433]
+process = ["postgres", "postmaster"]
+uri = "postgres://localhost:{port}/"
+probe = "postgres"
+
+[[signature]]
+name = "QuestDB"
+kind = "db"
+ports = [9000, 8812, 9009]
+process = ["questdb"]
+http_title = "QuestDB*"
+note = "9000 web console and REST, 8812 PostgreSQL wire protocol, 9009 InfluxDB line protocol. 9000 collides with MinIO, Portainer and ClickHouse native."
+
+[[signature]]
+name = "RethinkDB"
+kind = "db"
+ports = [28015, 29015, 8080]
+process = ["rethinkdb"]
+note = "28015 driver, 29015 intracluster, 8080 admin UI. The driver port is client-first — the client sends a version magic number before anything comes back."
+
+[[signature]]
+name = "ScyllaDB"
+kind = "db"
+ports = [9042, 19042]
+process = ["scylla"]
+note = "Cassandra-compatible, so 9042 collides with Cassandra — the scylla process name is the only reliable split. 19042 is the shard-aware CQL port and is Scylla-only."
+
+[[signature]]
+name = "SQL Server"
+kind = "db"
+ports = [1433]
+process = ["sqlservr"]
+
+[[signature]]
+name = "Supabase Postgres"
+kind = "db"
+ports = [54322]
+process = ["supabase_db", "postgres"]
+uri = "postgresql://postgres:postgres@localhost:{port}/postgres"
+probe = "postgres"
+note = "The Supabase CLI stack pins the database to 54322 (API 54321, Studio 54323), which is how it is told apart from a plain PostgreSQL on 5432."
+
+[[signature]]
+name = "Supabase Postgres (local)"
+kind = "db"
+ports = [54322]
+process = ["postgres"]
+uri = "postgresql://postgres:postgres@localhost:{port}/postgres"
+probe = "postgres"
+note = "The Supabase CLI stack pins the database to 54322 (API 54321, Studio 54323), which is how it is told apart from a plain PostgreSQL on 5432."
+
+[[signature]]
+name = "SurrealDB"
+kind = "db"
+ports = [8000]
+process = ["surreal"]
+http_server = "SurrealDB*"
+health = "/health"
+uri = "ws://localhost:{port}/rpc"
+note = "Shares 8000 with DynamoDB Local and Python dev servers; the Server header and the 'surreal start' argv are the reliable signals."
+
+[[signature]]
+name = "TiDB"
+kind = "db"
+ports = [4000, 10080]
+process = ["tidb-server"]
+health = "/status"
+probe = "mysql"
+note = "MySQL wire protocol on 4000, so it looks like MySQL to a protocol probe; 10080 is the HTTP status server. 4000 is also LiteLLM's port, so the process name decides."
+
+[[signature]]
+name = "TiKV"
+kind = "db"
+ports = [20160, 20180]
+process = ["tikv-server"]
+note = "20160 gRPC, 20180 status and metrics."
+
+[[signature]]
+name = "YugabyteDB"
+kind = "db"
+ports = [5433]
+process = ["yb-tserver", "yb-master", "yugabyted"]
+uri = "postgresql://yugabyte@localhost:{port}/yugabyte"
+probe = "postgres"
+note = "YSQL sits on 5433, not 5432, so it can coexist with PostgreSQL; the master and tserver web UIs default to 7000 and 9000."
+
+
+# ─── cache ───────────────────────────────────────────────────────────
+
+[[signature]]
+name = "Apache Ignite"
+kind = "cache"
+ports = [10800]
+process = ["ignite", "org.apache.ignite.startup.cmdline"]
+note = "10800 is the thin-client port; cluster ports 47100 (communication) and 47500 (discovery) are also opened."
+
+[[signature]]
+name = "bazel-remote"
+kind = "cache"
+ports = [8080, 9092]
+process = ["bazel-remote"]
+health = "/status"
+uri = "http://localhost:{port}/"
+note = "8080 is the HTTP cache, 9092 the gRPC Remote Execution API endpoint — the same number Kafka uses."
+
+[[signature]]
+name = "Dragonfly"
+kind = "cache"
+ports = [6379]
+process = ["dragonfly"]
+uri = "redis://localhost:{port}"
+probe = "redis"
+note = "Same port as Redis and also answers plain HTTP on it (built-in console and metrics), so an HTTP probe to 6379 can succeed."
+
+[[signature]]
+name = "Garnet"
+kind = "cache"
+ports = [3278]
+process = ["garnetserver", "garnet"]
+uri = "redis://localhost:{port}"
+probe = "redis"
+note = "Microsoft's RESP-compatible store; defaults to 3278 but is very often run on 6379 instead."
+
+[[signature]]
+name = "Hazelcast"
+kind = "cache"
+ports = [5701]
+process = ["hazelcast", "com.hazelcast.core.server"]
+health = "/hazelcast/health/node-state"
+note = "The member port is binary; the health endpoints answer on the same port only when the health REST group is enabled."
+
+[[signature]]
+name = "KeyDB"
+kind = "cache"
+ports = [6379]
+process = ["keydb-server"]
+uri = "redis://localhost:{port}"
+probe = "redis"
+note = "Multithreaded Redis fork; INFO server reports a keydb_version field alongside redis_version."
+
+[[signature]]
+name = "Memcached"
+kind = "cache"
+ports = [11211]
+process = ["memcached"]
+probe = "memcached"
+
+[[signature]]
+name = "Redis"
+kind = "cache"
+ports = [6379, 6380]
+process = ["redis-server"]
+uri = "redis://localhost:{port}"
+probe = "redis"
+
+[[signature]]
+name = "Redis Sentinel"
+kind = "cache"
+ports = [26379]
+process = ["redis-sentinel"]
+uri = "redis://localhost:{port}"
+probe = "redis"
+note = "Speaks RESP but rejects most data commands; INFO shows a sentinel section."
+
+[[signature]]
+name = "sccache"
+kind = "cache"
+ports = [4226]
+process = ["sccache"]
+uri = "tcp://127.0.0.1:{port}"
+note = "Local compiler-cache server port; overridden by SCCACHE_SERVER_PORT."
+
+[[signature]]
+name = "Valkey"
+kind = "cache"
+ports = [6379]
+process = ["valkey-server"]
+uri = "redis://localhost:{port}"
+probe = "redis"
+note = "Redis fork on the same default port; INFO server reports valkey_version."
+
+[[signature]]
+name = "Varnish"
+kind = "cache"
+ports = [6081, 6082]
+process = ["varnishd"]
+note = "6081 is the packaged listener default, 6082 the management CLI, which is not HTTP and answers with a numeric status line."
+
+
+# ─── vector ──────────────────────────────────────────────────────────
+
+[[signature]]
+name = "Chroma"
+kind = "vector"
+ports = [8000]
+process = ["chroma", "chromadb"]
+health = "/api/v2/heartbeat"
+uri = "http://localhost:{port}"
+note = "Shares port 8000 with vLLM, Triton and SurrealDB; the uvicorn Server header plus the chroma argv is what separates them."
+
+[[signature]]
+name = "Marqo"
+kind = "vector"
+ports = [8882]
+process = ["marqo"]
+uri = "http://localhost:{port}"
+
+[[signature]]
+name = "Milvus"
+kind = "vector"
+ports = [19530, 9091]
+process = ["milvus"]
+health = "/healthz"
+note = "19530 is the gRPC/SDK port and speaks no HTTP; the health check and the WebUI (/webui) live on 9091."
+
+[[signature]]
+name = "PostgreSQL + pgvector"
+kind = "vector"
+ports = [5432, 5433]
+process = ["postgres", "postmaster"]
+uri = "postgres://localhost:{port}/"
+probe = "postgres"
+note = "Indistinguishable from plain PostgreSQL on the wire; pgvector only shows up once you can query pg_extension."
+
+[[signature]]
+name = "Qdrant"
+kind = "vector"
+ports = [6333, 6334]
+process = ["qdrant"]
+health = "/healthz"
+note = "6333 is REST plus the web dashboard at /dashboard; 6334 is the gRPC API on the same process."
+
+[[signature]]
+name = "Vespa"
+kind = "vector"
+ports = [8080, 19071]
+process = ["vespa", "configserver", "config-server"]
+health = "/state/v1/health"
+note = "8080 is the query and document container, 19071 the config server; both are JVM processes, so argv is long and java-prefixed."
+
+[[signature]]
+name = "Weaviate"
+kind = "vector"
+ports = [8080]
+process = ["weaviate"]
+health = "/v1/.well-known/ready"
+uri = "http://localhost:{port}"
+note = "Also opens a gRPC listener on 50051 that newer clients prefer, but 50051 alone is too generic to identify it."
+
+
+# ─── search ──────────────────────────────────────────────────────────
+
+[[signature]]
+name = "Elasticsearch"
+kind = "search"
+ports = [9200, 9300]
+process = ["elasticsearch"]
+health = "/_cluster/health"
+
+[[signature]]
+name = "Meilisearch"
+kind = "search"
+ports = [7700]
+process = ["meilisearch"]
+health = "/health"
+
+[[signature]]
+name = "OpenSearch"
+kind = "search"
+process = ["opensearch"]
+health = "/_cluster/health"
+
+[[signature]]
+name = "Typesense"
+kind = "search"
+ports = [8108]
+process = ["typesense-server"]
+health = "/health"
+
+
+# ─── queue ───────────────────────────────────────────────────────────
+
+[[signature]]
+name = "ActiveMQ Artemis"
+kind = "queue"
+ports = [61616]
+process = ["artemis", "org.apache.activemq.artemis"]
+uri = "tcp://localhost:{port}"
+note = "A single multiplexed acceptor on 61616 speaks CORE, AMQP, STOMP, MQTT and OpenWire, so protocol sniffing alone will not tell you which broker it is."
+
+[[signature]]
+name = "ActiveMQ Classic"
+kind = "queue"
+ports = [61616, 61613, 61614]
+process = ["activemq", "org.apache.activemq.console.main"]
+note = "61616 OpenWire, 61613 STOMP, 61614 STOMP-over-WebSocket. The same broker also offers AMQP on 5672 and MQTT on 1883, colliding with RabbitMQ and Mosquitto."
+
+[[signature]]
+name = "ActiveMQ Web Console"
+kind = "queue"
+ports = [8161]
+process = ["activemq", "artemis"]
+http_title = "Apache ActiveMQ*"
+uri = "http://localhost:{port}/admin"
+note = "Shared by Classic and Artemis; the argv (activemq vs artemis) is what separates them."
+
+[[signature]]
+name = "AKHQ"
+kind = "queue"
+ports = [8080]
+process = ["akhq"]
+http_title = "AKHQ*"
+health = "/health"
+uri = "http://localhost:{port}/"
+note = "A Micronaut app, so /health rather than /actuator/health distinguishes it from Kafka UI on the same port."
+
+[[signature]]
+name = "Apache Kafka"
+kind = "queue"
+ports = [9092, 9093]
+process = ["kafka.kafka", "kafka-server-start"]
+uri = "localhost:{port}"
+note = "9092 is the broker listener, 9093 the KRaft controller listener; the controller port refuses ordinary client requests."
+
+[[signature]]
+name = "Apache Pulsar"
+kind = "queue"
+ports = [6650]
+process = ["pulsar", "org.apache.pulsar.broker"]
+uri = "pulsar://localhost:{port}"
+note = "6650 is the binary protocol; the same broker serves its admin REST API over HTTP on 8080."
+
+[[signature]]
+name = "Beanstalkd"
+kind = "queue"
+ports = [11300]
+process = ["beanstalkd"]
+uri = "beanstalk://localhost:{port}"
+note = "A line protocol, silent on connect; \"stats\\r\\n\" returns a YAML document."
+
+[[signature]]
+name = "CMAK"
+kind = "queue"
+ports = [9000]
+process = ["cmak", "kafka-manager"]
+uri = "http://localhost:{port}/"
+note = "Formerly Kafka Manager; shares 9000 with Kafdrop, so the process name is the only safe discriminator."
+
+[[signature]]
+name = "Eclipse Mosquitto"
+kind = "queue"
+ports = [1883, 8883]
+process = ["mosquitto"]
+uri = "mqtt://localhost:{port}"
+probe = "mqtt"
+note = "The server waits for the client CONNECT packet and never speaks first. 9001 for WebSockets is a convention in sample configs, not a built-in default."
+
+[[signature]]
+name = "EMQX"
+kind = "queue"
+ports = [1883, 8883, 8083, 8084]
+process = ["emqx", "beam.smp"]
+uri = "mqtt://localhost:{port}"
+probe = "mqtt"
+note = "An Erlang VM process, so argv is usually beam.smp; 8083/8084 are MQTT over WS and WSS."
+
+[[signature]]
+name = "EMQX Dashboard"
+kind = "queue"
+ports = [18083]
+process = ["emqx", "beam.smp"]
+http_server = "Cowboy*"
+health = "/status"
+uri = "http://localhost:{port}/"
+note = "/status returns the plain text \"emqx is running\" without auth; the REST API under /api/v5 needs an API key."
+
+[[signature]]
+name = "Faktory"
+kind = "queue"
+ports = [7419, 7420]
+process = ["faktory"]
+banner_text = "+HI "
+note = "Speaks first: the 7419 worker port greets with a RESP-style \"+HI {...}\" line. 7420 is the web UI."
+
+[[signature]]
+name = "Flower"
+kind = "queue"
+ports = [5555]
+process = ["flower", "celery flower"]
+http_title = "Flower*"
+health = "/healthcheck"
+uri = "http://localhost:{port}/"
+note = "Celery's monitoring UI. Celery workers themselves listen on nothing, so this is usually the only Celery-related socket on the box. Shares 5555 with Prisma Studio and Selenium Grid nodes."
+
+[[signature]]
+name = "Gearman"
+kind = "queue"
+ports = [4730]
+process = ["gearmand"]
+uri = "localhost:{port}"
+
+[[signature]]
+name = "HiveMQ"
+kind = "queue"
+ports = [1883]
+process = ["hivemq"]
+uri = "mqtt://localhost:{port}"
+probe = "mqtt"
+note = "The community edition exposes only the MQTT listener by default; the control center and REST API are commercial add-ons."
+
+[[signature]]
+name = "Kafdrop"
+kind = "queue"
+ports = [9000]
+process = ["kafdrop"]
+http_title = "Kafdrop*"
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Kafka"
+kind = "queue"
+ports = [9092, 9093]
+process = ["kafka.Kafka", "kafka"]
+
+[[signature]]
+name = "Kafka Connect"
+kind = "queue"
+ports = [8083]
+process = ["connectdistributed", "connectstandalone", "connect-distributed"]
+uri = "http://localhost:{port}/connectors"
+note = "The root path returns the worker version as JSON; Debezium runs inside this process rather than on its own port."
+
+[[signature]]
+name = "Kafka UI"
+kind = "queue"
+ports = [8080]
+process = ["kafka-ui", "kafbat"]
+http_title = "UI for Apache Kafka*"
+health = "/actuator/health"
+uri = "http://localhost:{port}/"
+note = "A Spring Boot app (provectus, now maintained as Kafbat UI); the actuator path is the reliable discriminator on a crowded 8080."
+
+[[signature]]
+name = "ksqlDB"
+kind = "queue"
+ports = [8088]
+process = ["ksqlservermain", "ksql-server-start"]
+health = "/healthcheck"
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Mosquitto"
+kind = "queue"
+ports = [1883, 8883]
+process = ["mosquitto"]
+uri = "mqtt://localhost:{port}"
+probe = "mqtt"
+
+[[signature]]
+name = "NanoMQ"
+kind = "queue"
+ports = [1883]
+process = ["nanomq"]
+uri = "mqtt://localhost:{port}"
+probe = "mqtt"
+
+[[signature]]
+name = "NATS"
+kind = "queue"
+ports = [4222]
+process = ["nats-server", "gnatsd"]
+banner_text = "INFO {"
+uri = "nats://localhost:{port}"
+note = "One of the few brokers that genuinely speaks first — it pushes a JSON INFO line before the client says anything. 6222 is the cluster route port."
+
+[[signature]]
+name = "nsqadmin"
+kind = "queue"
+ports = [4171]
+process = ["nsqadmin"]
+health = "/ping"
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "nsqd"
+kind = "queue"
+ports = [4150, 4151]
+process = ["nsqd"]
+health = "/ping"
+note = "4150 is the TCP client protocol, 4151 the HTTP API where /ping lives."
+
+[[signature]]
+name = "nsqlookupd"
+kind = "queue"
+ports = [4160, 4161]
+process = ["nsqlookupd"]
+health = "/ping"
+
+[[signature]]
+name = "Pulsar"
+kind = "queue"
+ports = [6650]
+process = ["pulsar"]
+
+[[signature]]
+name = "Pulsar Admin API"
+kind = "queue"
+ports = [8080]
+process = ["pulsar", "org.apache.pulsar.broker"]
+health = "/admin/v2/brokers/health"
+uri = "http://localhost:{port}/admin/v2/clusters"
+
+[[signature]]
+name = "RabbitMQ"
+kind = "queue"
+ports = [5672]
+process = ["rabbitmq-server", "rabbit@", "beam.smp"]
+uri = "amqp://guest:guest@localhost:{port}/"
+probe = "amqp"
+note = "Runs on the Erlang VM, so argv is usually beam.smp with rabbit in the boot args; 25672 (distribution) and 4369 (epmd) belong to the same node."
+
+[[signature]]
+name = "RabbitMQ Management"
+kind = "queue"
+ports = [15672]
+process = ["rabbitmq-server", "beam.smp"]
+http_server = "Cowboy*"
+http_title = "RabbitMQ Management*"
+uri = "http://localhost:{port}/"
+note = "The management API lives under /api and every endpoint requires basic auth, so an unauthenticated health probe returns 401."
+
+[[signature]]
+name = "Redpanda"
+kind = "queue"
+ports = [9092, 9644]
+process = ["redpanda"]
+health = "/v1/status/ready"
+note = "Kafka-compatible on 9092; 9644 is the admin API where the health path lives, and the same process usually also serves a schema registry on 8081 and an HTTP proxy on 8082."
+
+[[signature]]
+name = "Redpanda Connect"
+kind = "queue"
+ports = [4195]
+process = ["benthos", "redpanda-connect", "rpk connect"]
+health = "/ping"
+uri = "http://localhost:{port}/stats"
+note = "Formerly Benthos; the 4195 HTTP port serves /ping, /stats and /metrics."
+
+[[signature]]
+name = "Redpanda Console"
+kind = "queue"
+ports = [8080]
+process = ["redpanda-console"]
+http_title = "Redpanda Console*"
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Sidekiq"
+kind = "queue"
+process = ["sidekiq"]
+http_title = "*Sidekiq*"
+note = "Listens on nothing of its own — it connects out to Redis. Sidekiq::Web is a Rack app mounted inside the host application, conventionally at /sidekiq, so it shares the Rails server's port."
+
+[[signature]]
+name = "Sidekiq Web"
+kind = "queue"
+process = ["sidekiq", "puma", "rails"]
+http_title = "*Sidekiq*"
+note = "No port of its own — it is a Rack app mounted inside the host application, conventionally at /sidekiq, so it shares the Rails server's port."
+
+[[signature]]
+name = "VerneMQ"
+kind = "queue"
+ports = [1883]
+process = ["vernemq", "vmq", "beam.smp"]
+uri = "mqtt://localhost:{port}"
+probe = "mqtt"
+note = "An Erlang broker; argv is typically beam.smp with vernemq in the boot args."
+
+
+# ─── storage ─────────────────────────────────────────────────────────
+
+[[signature]]
+name = "Ceph RADOS Gateway"
+kind = "storage"
+ports = [7480]
+process = ["radosgw", "rgw"]
+http_server = "*Ceph*"
+uri = "http://localhost:{port}/"
+note = "7480 holds for the current beast front end; older civetweb setups often used 80."
+
+[[signature]]
+name = "Garage"
+kind = "storage"
+ports = [3900, 3902, 3903]
+process = ["garage"]
+note = "3900 S3 API, 3902 web and static hosting, 3903 admin API; 3901 is the inter-node RPC port, not HTTP."
+
+[[signature]]
+name = "MinIO"
+kind = "storage"
+ports = [9000, 9001]
+process = ["minio"]
+http_server = "MinIO*"
+health = "/minio/health/live"
+note = "9000 is the S3 API; 9001 is the console when started with --console-address."
+
+[[signature]]
+name = "NFS server"
+kind = "storage"
+ports = [2049]
+process = ["nfsd", "rpc.nfsd"]
+note = "Ancillary services (mountd, statd, lockd) get their ports from rpcbind unless pinned, so none are claimed."
+
+[[signature]]
+name = "ProFTPD"
+kind = "storage"
+ports = [21]
+process = ["proftpd"]
+banner_text = "220 "
+uri = "ftp://localhost:{port}/"
+
+[[signature]]
+name = "Pure-FTPd"
+kind = "storage"
+ports = [21]
+process = ["pure-ftpd"]
+banner_text = "220 "
+uri = "ftp://localhost:{port}/"
+
+[[signature]]
+name = "Rclone Serve"
+kind = "storage"
+ports = [8080]
+process = ["rclone serve"]
+uri = "http://localhost:{port}/"
+note = "rclone serve s3, http and webdav all default to 8080; the subcommand in argv says which protocol."
+
+[[signature]]
+name = "Rclone Serve S3"
+kind = "storage"
+ports = [8080]
+process = ["rclone serve"]
+uri = "http://localhost:{port}/"
+note = "rclone serve s3/http/webdav all default to 8080; the subcommand in argv says which protocol."
+
+[[signature]]
+name = "rsync daemon"
+kind = "storage"
+ports = [873]
+process = ["rsync"]
+uri = "rsync://localhost:{port}/"
+
+[[signature]]
+name = "Samba"
+kind = "storage"
+ports = [445, 139]
+process = ["smbd", "nmbd"]
+
+[[signature]]
+name = "SeaweedFS Filer"
+kind = "storage"
+ports = [8888]
+process = ["weed filer", "weed server"]
+uri = "http://localhost:{port}/"
+note = "Shares 8888 with Jupyter, netlify dev, Tinyproxy and the Hoverfly admin API."
+
+[[signature]]
+name = "SeaweedFS Master"
+kind = "storage"
+ports = [9333]
+process = ["weed master", "weed server"]
+uri = "http://localhost:{port}/"
+note = "The master UI lists volume servers. Volume servers themselves are assigned ports at launch and often incremented, so none are claimed."
+
+[[signature]]
+name = "SeaweedFS S3 Gateway"
+kind = "storage"
+ports = [8333]
+process = ["weed s3"]
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "SFTPGo"
+kind = "storage"
+ports = [2022, 8080]
+process = ["sftpgo"]
+health = "/healthz"
+note = "2022 is SFTP, 8080 the admin UI and REST API."
+
+[[signature]]
+name = "Syncthing"
+kind = "storage"
+ports = [8384, 22000, 21027]
+process = ["syncthing"]
+http_title = "Syncthing*"
+health = "/rest/noauth/health"
+note = "8384 is the GUI, 22000 sync traffic, 21027/udp local discovery."
+
+[[signature]]
+name = "vsftpd"
+kind = "storage"
+ports = [21]
+process = ["vsftpd"]
+banner_text = "220 "
+uri = "ftp://localhost:{port}/"
+
+
+# ─── metrics ─────────────────────────────────────────────────────────
+
+[[signature]]
+name = "Alertmanager"
+kind = "metrics"
+ports = [9093]
+process = ["alertmanager"]
+http_title = "Alertmanager*"
+health = "/-/healthy"
+uri = "http://localhost:{port}/"
+note = "9094 on the same host is the gossip and cluster port, not the UI. 9093 is also Kafka's KRaft controller listener."
+
+[[signature]]
+name = "blackbox_exporter"
+kind = "metrics"
+ports = [9115]
+process = ["blackbox_exporter"]
+http_title = "Blackbox Exporter*"
+uri = "http://localhost:{port}/probe"
+
+[[signature]]
+name = "cAdvisor"
+kind = "metrics"
+ports = [8080]
+process = ["cadvisor"]
+http_title = "cAdvisor*"
+health = "/healthz"
+uri = "http://localhost:{port}/containers/"
+
+[[signature]]
+name = "Carbon"
+kind = "metrics"
+ports = [2003, 2004, 2023, 2024]
+process = ["carbon-cache", "carbon-relay", "carbon-aggregator", "go-carbon"]
+note = "Graphite ingestion: 2003 plaintext, 2004 pickle, 2023/2024 the aggregator equivalents. It never speaks first."
+
+[[signature]]
+name = "Datadog Agent"
+kind = "metrics"
+ports = [8125, 8126]
+process = ["datadog-agent", "trace-agent", "dogstatsd"]
+note = "8126 is the APM trace intake and collides with the StatsD admin port; 8125 (DogStatsD) is usually UDP."
+
+[[signature]]
+name = "DCGM Exporter"
+kind = "metrics"
+ports = [9400]
+process = ["dcgm-exporter"]
+uri = "http://localhost:{port}/metrics"
+
+[[signature]]
+name = "Elastic APM Server"
+kind = "metrics"
+ports = [8200]
+process = ["apm-server"]
+uri = "http://localhost:{port}/"
+note = "Shares 8200 with HashiCorp Vault; the process name decides."
+
+[[signature]]
+name = "elasticsearch_exporter"
+kind = "metrics"
+ports = [9114]
+process = ["elasticsearch_exporter"]
+uri = "http://localhost:{port}/metrics"
+
+[[signature]]
+name = "Fluent Bit"
+kind = "metrics"
+ports = [2020, 24224]
+process = ["fluent-bit", "fluentbit"]
+health = "/api/v1/health"
+note = "2020 is the built-in HTTP monitoring server; 24224 appears only when a forward input is configured."
+
+[[signature]]
+name = "Fluentd"
+kind = "metrics"
+ports = [24224]
+process = ["fluentd"]
+note = "24224 is the forward input — msgpack, client speaks first. Monitoring ports vary by plugin config."
+
+[[signature]]
+name = "Grafana"
+kind = "metrics"
+ports = [3000]
+process = ["grafana", "grafana-server"]
+http_title = "Grafana*"
+health = "/api/health"
+uri = "http://localhost:{port}/"
+note = "Port 3000 is heavily shared with Node dev servers; the /api/health JSON is the reliable tell."
+
+[[signature]]
+name = "Grafana Agent"
+kind = "metrics"
+ports = [12345]
+process = ["grafana-agent", "agentctl"]
+health = "/-/ready"
+uri = "http://localhost:{port}/"
+note = "Superseded by Alloy; same default HTTP port, different process name."
+
+[[signature]]
+name = "Grafana Alloy"
+kind = "metrics"
+ports = [12345]
+process = ["alloy"]
+health = "/-/ready"
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Grafana Loki"
+kind = "metrics"
+ports = [3100]
+process = ["loki"]
+health = "/ready"
+uri = "http://localhost:{port}/loki/api/v1/labels"
+
+[[signature]]
+name = "Grafana Mimir"
+kind = "metrics"
+ports = [8080]
+process = ["mimir"]
+health = "/ready"
+uri = "http://localhost:{port}/prometheus"
+note = "Monolithic mode defaults to 8080, shared with cAdvisor and countless app servers."
+
+[[signature]]
+name = "Grafana Pyroscope"
+kind = "metrics"
+ports = [4040]
+process = ["pyroscope"]
+health = "/ready"
+uri = "http://localhost:{port}/"
+note = "Shares 4040 with ngrok's inspector and the Spark application UI."
+
+[[signature]]
+name = "Grafana Tempo"
+kind = "metrics"
+ports = [3200]
+process = ["tempo"]
+health = "/ready"
+uri = "http://localhost:{port}/api/echo"
+note = "Its OTLP receivers usually also open 4317/4318, which look identical to a collector."
+
+[[signature]]
+name = "haproxy_exporter"
+kind = "metrics"
+ports = [9101]
+process = ["haproxy_exporter"]
+uri = "http://localhost:{port}/metrics"
+
+[[signature]]
+name = "Jaeger"
+kind = "metrics"
+ports = [16686, 14268, 14250, 14269]
+process = ["jaeger", "jaeger-all-in-one", "jaeger-collector", "jaeger-query"]
+http_title = "Jaeger UI*"
+note = "16686 UI, 14268 collector HTTP, 14250 collector gRPC, 14269 admin. Jaeger v2 also opens OTLP 4317/4318, which looks like a collector."
+
+[[signature]]
+name = "kafka_exporter"
+kind = "metrics"
+ports = [9308]
+process = ["kafka_exporter"]
+uri = "http://localhost:{port}/metrics"
+
+[[signature]]
+name = "Loki"
+kind = "metrics"
+ports = [3100]
+process = ["loki"]
+health = "/ready"
+
+[[signature]]
+name = "mongodb_exporter"
+kind = "metrics"
+ports = [9216]
+process = ["mongodb_exporter"]
+uri = "http://localhost:{port}/metrics"
+
+[[signature]]
+name = "mysqld_exporter"
+kind = "metrics"
+ports = [9104]
+process = ["mysqld_exporter"]
+uri = "http://localhost:{port}/metrics"
+
+[[signature]]
+name = "NATS Monitoring"
+kind = "metrics"
+ports = [8222]
+process = ["nats-server"]
+health = "/healthz"
+uri = "http://localhost:{port}/varz"
+
+[[signature]]
+name = "Netdata"
+kind = "metrics"
+ports = [19999]
+process = ["netdata"]
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "nginx-prometheus-exporter"
+kind = "metrics"
+ports = [9113]
+process = ["nginx-prometheus-exporter", "nginx_exporter"]
+uri = "http://localhost:{port}/metrics"
+
+[[signature]]
+name = "node_exporter"
+kind = "metrics"
+ports = [9100]
+process = ["node_exporter", "prometheus-node-exporter"]
+http_title = "Node Exporter*"
+uri = "http://localhost:{port}/metrics"
+
+[[signature]]
+name = "OpenObserve"
+kind = "metrics"
+ports = [5080, 5081]
+process = ["openobserve"]
+note = "5080 is HTTP, the UI and OTLP-HTTP; 5081 is the gRPC endpoint. 5080 is also Dgraph Zero's gRPC port and Pinecone Local's."
+
+[[signature]]
+name = "OpenTelemetry Collector"
+kind = "metrics"
+ports = [4317, 4318, 8888, 13133, 55679, 1777]
+process = ["otelcol", "otelcol-contrib", "otelcorecol", "otelcol-k8s"]
+note = "4317 OTLP gRPC, 4318 OTLP HTTP, 8888 its own metrics, 13133 health_check (responds on /), 55679 zpages, 1777 pprof."
+
+[[signature]]
+name = "Parca"
+kind = "metrics"
+ports = [7070]
+process = ["parca", "parca-agent"]
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "postgres_exporter"
+kind = "metrics"
+ports = [9187]
+process = ["postgres_exporter"]
+uri = "http://localhost:{port}/metrics"
+
+[[signature]]
+name = "process-exporter"
+kind = "metrics"
+ports = [9256]
+process = ["process-exporter"]
+uri = "http://localhost:{port}/metrics"
+
+[[signature]]
+name = "Prometheus"
+kind = "metrics"
+ports = [9090]
+process = ["prometheus"]
+http_title = "Prometheus*"
+health = "/-/healthy"
+uri = "http://localhost:{port}/graph"
+note = "Also serves /-/ready and /api/v1/query; agent mode uses the same port."
+
+[[signature]]
+name = "Prometheus Pushgateway"
+kind = "metrics"
+ports = [9091]
+process = ["pushgateway"]
+http_title = "Prometheus Pushgateway*"
+health = "/-/healthy"
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Promtail"
+kind = "metrics"
+ports = [9080]
+process = ["promtail"]
+health = "/ready"
+uri = "http://localhost:{port}/metrics"
+note = "9080 is also APISIX's proxy port; the process name decides."
+
+[[signature]]
+name = "RabbitMQ Prometheus"
+kind = "metrics"
+ports = [15692]
+process = ["rabbitmq-server", "beam.smp"]
+health = "/metrics"
+
+[[signature]]
+name = "rabbitmq_exporter"
+kind = "metrics"
+ports = [9419]
+process = ["rabbitmq_exporter"]
+uri = "http://localhost:{port}/metrics"
+
+[[signature]]
+name = "redis_exporter"
+kind = "metrics"
+ports = [9121]
+process = ["redis_exporter"]
+uri = "http://localhost:{port}/metrics"
+
+[[signature]]
+name = "Sentry"
+kind = "metrics"
+ports = [9000]
+process = ["sentry"]
+http_title = "Sentry*"
+health = "/_health/"
+uri = "http://localhost:{port}/"
+note = "The self-hosted default bind; the compose stack fronts it with nginx, so the published port is often remapped."
+
+[[signature]]
+name = "SigNoz"
+kind = "metrics"
+ports = [3301]
+process = ["signoz", "query-service"]
+http_title = "SigNoz*"
+uri = "http://localhost:{port}/"
+note = "3301 is the UI; the bundled collector holds 4317/4318 and the query service 8080."
+
+[[signature]]
+name = "snmp_exporter"
+kind = "metrics"
+ports = [9116]
+process = ["snmp_exporter"]
+uri = "http://localhost:{port}/snmp"
+
+[[signature]]
+name = "StatsD"
+kind = "metrics"
+ports = [8125, 8126]
+process = ["statsd"]
+note = "8125 is normally UDP; 8126 is the TCP management interface, which answers 'help' but sends nothing on connect."
+
+[[signature]]
+name = "statsd_exporter"
+kind = "metrics"
+ports = [9102, 9125]
+process = ["statsd_exporter"]
+note = "9102 serves Prometheus metrics, 9125 accepts the StatsD line protocol over UDP and TCP."
+
+[[signature]]
+name = "Supabase Analytics"
+kind = "metrics"
+ports = [54327]
+process = ["supabase_analytics", "logflare"]
+uri = "http://localhost:{port}/"
+note = "The Logflare instance backing the local log viewer."
+
+[[signature]]
+name = "Telegraf"
+kind = "metrics"
+ports = [9273]
+process = ["telegraf"]
+uri = "http://localhost:{port}/metrics"
+note = "Telegraf normally listens on nothing at all; 9273 appears only with the prometheus_client output enabled."
+
+[[signature]]
+name = "Thanos"
+kind = "metrics"
+ports = [10901, 10902]
+process = ["thanos"]
+health = "/-/healthy"
+note = "10902 is HTTP and the UI for every component, 10901 the Store API gRPC port."
+
+[[signature]]
+name = "Uptime Kuma"
+kind = "metrics"
+ports = [3001]
+process = ["uptime-kuma"]
+http_title = "Uptime Kuma*"
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Uptrace"
+kind = "metrics"
+ports = [14317, 14318]
+process = ["uptrace"]
+note = "14318 serves both the UI and OTLP/HTTP; 14317 is OTLP gRPC."
+
+[[signature]]
+name = "Vector"
+kind = "metrics"
+ports = [8686]
+process = ["vector"]
+uri = "http://localhost:{port}/graphql"
+note = "8686 is the GraphQL API and playground, open only when the api component is enabled. Lidarr uses the same port."
+
+[[signature]]
+name = "VictoriaLogs"
+kind = "metrics"
+ports = [9428]
+process = ["victoria-logs", "victorialogs"]
+health = "/health"
+uri = "http://localhost:{port}/select/vmui"
+
+[[signature]]
+name = "VictoriaMetrics"
+kind = "metrics"
+ports = [8428]
+process = ["victoria-metrics", "victoriametrics"]
+health = "/health"
+uri = "http://localhost:{port}/vmui"
+note = "Single-node only; the cluster build uses vminsert 8480, vmselect 8481, vmstorage 8482."
+
+[[signature]]
+name = "vmagent"
+kind = "metrics"
+ports = [8429]
+process = ["vmagent"]
+health = "/health"
+uri = "http://localhost:{port}/targets"
+
+[[signature]]
+name = "vmalert"
+kind = "metrics"
+ports = [8880]
+process = ["vmalert"]
+health = "/health"
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "windows_exporter"
+kind = "metrics"
+ports = [9182]
+process = ["windows_exporter"]
+uri = "http://localhost:{port}/metrics"
+
+[[signature]]
+name = "Zabbix Agent"
+kind = "metrics"
+ports = [10050]
+process = ["zabbix_agentd", "zabbix_agent2"]
+note = "Passive checks only; the server sends the request first, so there is no banner."
+
+[[signature]]
+name = "Zabbix Server"
+kind = "metrics"
+ports = [10051]
+process = ["zabbix_server", "zabbix_proxy"]
+
+[[signature]]
+name = "Zipkin"
+kind = "metrics"
+ports = [9411]
+process = ["zipkin"]
+http_title = "Zipkin*"
+health = "/health"
+uri = "http://localhost:{port}/zipkin/"
+
+
+# ─── proxy ───────────────────────────────────────────────────────────
+
+[[signature]]
+name = "Apache APISIX"
+kind = "proxy"
+ports = [9080, 9443, 9180]
+process = ["apisix", "openresty"]
+http_server = "APISIX/*"
+note = "9180 is the Admin API. It runs on OpenResty, so argv is often just openresty."
+
+[[signature]]
+name = "Apache httpd"
+kind = "proxy"
+process = ["httpd", "apache2"]
+http_server = "Apache*"
+
+[[signature]]
+name = "Apache Traffic Server"
+kind = "proxy"
+ports = [8080]
+process = ["traffic_server", "traffic_manager"]
+http_server = "ATS/*"
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Envoy"
+kind = "proxy"
+ports = [9901]
+process = ["envoy"]
+http_server = "envoy*"
+health = "/ready"
+uri = "http://localhost:{port}/"
+note = "9901 is the admin interface by convention; data-plane listeners are entirely config-defined (10000 in most examples), so none are claimed."
+
+[[signature]]
+name = "HAProxy"
+kind = "proxy"
+process = ["haproxy"]
+note = "No default port at all — every listener comes from the config. 8404 is only a docs convention for the stats page."
+
+[[signature]]
+name = "Istio sidecar"
+kind = "proxy"
+ports = [15000, 15001, 15006, 15020, 15021, 15090]
+process = ["pilot-agent", "istio-proxy", "envoy"]
+health = "/healthz/ready"
+note = "15000 admin, 15001/15006 outbound and inbound capture, 15020 agent, 15021 health, 15090 Prometheus."
+
+[[signature]]
+name = "Kong Gateway"
+kind = "proxy"
+ports = [8000, 8443, 8001, 8444, 8002]
+process = ["kong"]
+http_server = "kong/*"
+health = "/status"
+note = "Runs as nginx workers, so argv often shows nginx: 8000 proxies traffic, 8001 is the Admin API, 8002 Kong Manager."
+
+[[signature]]
+name = "KrakenD"
+kind = "proxy"
+ports = [8080]
+process = ["krakend"]
+health = "/__health"
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Laravel Herd / Valet"
+kind = "proxy"
+ports = [80, 443]
+process = ["valet", "herd"]
+note = "An nginx front end mapping *.test hostnames to project directories; the listener looks like plain nginx on 80/443."
+
+[[signature]]
+name = "MariaDB MaxScale"
+kind = "proxy"
+ports = [8989]
+process = ["maxscale"]
+note = "8989 is the REST API and GUI default (the same number Sonarr uses); the actual SQL listener ports are defined per service in the config and have no fixed default."
+
+[[signature]]
+name = "MySQL Router"
+kind = "proxy"
+ports = [6446, 6447, 6448, 6449]
+process = ["mysqlrouter"]
+probe = "mysql"
+note = "6446/6447 are classic-protocol read-write and read-only; 6448/6449 are the X Protocol equivalents."
+
+[[signature]]
+name = "Nginx Proxy Manager"
+kind = "proxy"
+ports = [81, 80, 443]
+process = ["nginx"]
+http_title = "Nginx Proxy Manager*"
+note = "The admin UI is on 81; the proxy itself is indistinguishable from bare nginx by process name."
+
+[[signature]]
+name = "PgBouncer"
+kind = "proxy"
+ports = [6432]
+process = ["pgbouncer"]
+uri = "postgresql://localhost:{port}/pgbouncer"
+probe = "postgres"
+note = "Connecting to the virtual database named pgbouncer opens the admin console rather than a real backend."
+
+[[signature]]
+name = "PgCat"
+kind = "proxy"
+ports = [6432]
+process = ["pgcat"]
+uri = "postgresql://localhost:{port}/"
+probe = "postgres"
+note = "A drop-in PgBouncer replacement on the same conventional port; only the process name separates the two."
+
+[[signature]]
+name = "Pgpool-II"
+kind = "proxy"
+ports = [9999, 9898]
+process = ["pgpool"]
+probe = "postgres"
+note = "9999 carries PostgreSQL traffic; 9898 is the PCP administration port and does not speak the Postgres protocol."
+
+[[signature]]
+name = "Privoxy"
+kind = "proxy"
+ports = [8118]
+process = ["privoxy"]
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "ProxySQL"
+kind = "proxy"
+ports = [6033, 6032]
+process = ["proxysql"]
+probe = "mysql"
+note = "6033 is the MySQL traffic port (a digit swap of 3306); 6032 is the admin interface, itself reachable with a MySQL client."
+
+[[signature]]
+name = "Squid"
+kind = "proxy"
+ports = [3128]
+process = ["squid"]
+http_server = "squid*"
+uri = "http://localhost:{port}/"
+note = "Expects proxy-style absolute-URI requests, so a plain GET / returns an error page rather than a site."
+
+[[signature]]
+name = "Supavisor"
+kind = "proxy"
+ports = [6543]
+process = ["supavisor"]
+uri = "postgresql://localhost:{port}/"
+probe = "postgres"
+note = "Supabase's pooler: 6543 is transaction mode, while session mode is served on the ordinary 5432."
+
+[[signature]]
+name = "Tinyproxy"
+kind = "proxy"
+ports = [8888]
+process = ["tinyproxy"]
+http_server = "tinyproxy/*"
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Traefik"
+kind = "proxy"
+ports = [80, 443, 8080]
+process = ["traefik"]
+http_title = "Traefik*"
+health = "/ping"
+uri = "http://localhost:{port}/"
+note = "8080 is the API and dashboard, served only when the insecure API is enabled."
+
+[[signature]]
+name = "Tyk Gateway"
+kind = "proxy"
+ports = [8080]
+process = ["tyk"]
+health = "/hello"
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Vitess"
+kind = "proxy"
+ports = [15306]
+process = ["vtgate", "vttablet", "vtctld"]
+probe = "mysql"
+note = "vtgate's MySQL protocol port in every standard local example is 15306; its gRPC and HTTP ports are set by flag and vary by deployment."
+
+
+# ─── tunnel ──────────────────────────────────────────────────────────
+
+[[signature]]
+name = "bore"
+kind = "tunnel"
+ports = [7835]
+process = ["bore"]
+note = "7835 is the control port on the bore server; the client itself only dials out."
+
+[[signature]]
+name = "cloudflared"
+kind = "tunnel"
+process = ["cloudflared"]
+note = "Connects outbound only; the metrics and diagnostic server binds a random loopback port unless --metrics is set."
+
+[[signature]]
+name = "Expose"
+kind = "tunnel"
+process = ["expose"]
+note = "A PHP tunnel client; the local dashboard port is configurable and the server side is a separate `expose serve` process."
+
+[[signature]]
+name = "frpc"
+kind = "tunnel"
+process = ["frpc"]
+note = "Dials out to frps; it only listens locally when the admin UI is enabled, on a port taken from the config."
+
+[[signature]]
+name = "frps"
+kind = "tunnel"
+ports = [7000, 7500]
+process = ["frps"]
+note = "7000 is the control port for clients, 7500 the dashboard; vhost HTTP ports are config-defined. On macOS 7000 is also the AirPlay Receiver."
+
+[[signature]]
+name = "Headscale"
+kind = "tunnel"
+ports = [8080, 9090]
+process = ["headscale"]
+note = "8080 serves the control plane, 9090 metrics and debug endpoints."
+
+[[signature]]
+name = "localtunnel"
+kind = "tunnel"
+process = ["localtunnel"]
+note = "The client opens no local listener of its own; only the self-hosted localtunnel server listens, on a configured port."
+
+[[signature]]
+name = "ngrok"
+kind = "tunnel"
+ports = [4040]
+process = ["ngrok"]
+http_title = "ngrok*"
+health = "/api/tunnels"
+uri = "http://localhost:{port}/"
+note = "4040 is the local inspector UI and agent API (/api/tunnels lists the public URLs); the tunnel itself is outbound."
+
+[[signature]]
+name = "OpenVPN"
+kind = "tunnel"
+ports = [1194]
+process = ["openvpn"]
+note = "1194 is the UDP default; TCP deployments conventionally move to 443."
+
+[[signature]]
+name = "Stripe CLI listener"
+kind = "tunnel"
+process = ["stripe listen", "stripe"]
+note = "Forwards webhooks outward over a websocket and binds nothing locally, so any port associated with it belongs to the app it forwards to."
+
+[[signature]]
+name = "Tailscale"
+kind = "tunnel"
+ports = [41641]
+process = ["tailscaled", "tailscale"]
+note = "41641/udp is the direct WireGuard port; the local control API is a unix socket on macOS and Linux, not a TCP port."
+
+[[signature]]
+name = "WireGuard"
+kind = "tunnel"
+ports = [51820]
+process = ["wireguard", "wg-quick", "wireguard-go"]
+note = "UDP only, and the kernel implementation owns the socket with no userspace process to match on Linux."
+
+[[signature]]
+name = "ZeroTier One"
+kind = "tunnel"
+ports = [9993]
+process = ["zerotier-one"]
+
+
+# ─── auth ────────────────────────────────────────────────────────────
+
+[[signature]]
+name = "389 Directory Server"
+kind = "auth"
+ports = [389, 636]
+process = ["ns-slapd"]
+uri = "ldap://localhost:{port}"
+note = "Shares LDAP's ports with OpenLDAP; the process name ns-slapd is the only distinguisher."
+
+[[signature]]
+name = "Authelia"
+kind = "auth"
+ports = [9091]
+process = ["authelia"]
+http_title = "Authelia*"
+health = "/api/health"
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "authentik"
+kind = "auth"
+ports = [9000, 9443]
+process = ["authentik", "ak-server"]
+http_title = "authentik*"
+health = "/-/health/live/"
+uri = "http://localhost:{port}/if/admin/"
+note = "Port 9000 collides with Portainer, MinIO and SonarQube; the /-/health/live/ path is the reliable tell."
+
+[[signature]]
+name = "Casdoor"
+kind = "auth"
+ports = [8000]
+process = ["casdoor"]
+http_title = "Casdoor*"
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Dex"
+kind = "auth"
+ports = [5556, 5557]
+process = ["dex"]
+health = "/healthz"
+uri = "http://localhost:{port}/dex/.well-known/openid-configuration"
+note = "5557 is the gRPC API, not HTTP; the OIDC issuer is usually mounted under /dex."
+
+[[signature]]
+name = "Firebase Auth Emulator"
+kind = "auth"
+ports = [9099]
+process = ["firebase", "firebase-tools"]
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "FusionAuth"
+kind = "auth"
+ports = [9011, 9012]
+process = ["fusionauth"]
+http_title = "*FusionAuth*"
+health = "/api/status"
+uri = "http://localhost:{port}/admin/"
+note = "9011 is the application, 9012 the management and monitoring listener."
+
+[[signature]]
+name = "HashiCorp Boundary"
+kind = "auth"
+ports = [9200, 9201, 9202]
+process = ["boundary"]
+note = "9200 controller API and UI, 9201 controller cluster, 9202 worker proxy."
+
+[[signature]]
+name = "HashiCorp Vault"
+kind = "auth"
+ports = [8200, 8201]
+process = ["vault"]
+health = "/v1/sys/health"
+uri = "http://localhost:{port}/ui/"
+note = "8201 is cluster-internal request forwarding, not an API you can talk to. /v1/sys/health returns 501 when uninitialised and 503 when sealed — both mean Vault is there."
+
+[[signature]]
+name = "Keycloak"
+kind = "auth"
+ports = [8080, 8443]
+process = ["keycloak", "kc.sh"]
+http_title = "*Keycloak*"
+health = "/health/ready"
+uri = "http://localhost:{port}/admin/"
+note = "Since v24 health and metrics moved to a separate management port (9000), not 8080."
+
+[[signature]]
+name = "lldap"
+kind = "auth"
+ports = [3890, 17170]
+process = ["lldap"]
+note = "3890 is LDAP, 17170 the web UI — it deliberately avoids privileged port 389."
+
+[[signature]]
+name = "Logto"
+kind = "auth"
+ports = [3001, 3002]
+process = ["logto"]
+note = "3001 is the core/OIDC endpoint, 3002 the admin console."
+
+[[signature]]
+name = "MIT Kerberos KDC"
+kind = "auth"
+ports = [88, 464, 749]
+process = ["krb5kdc", "kadmind"]
+note = "Primarily UDP; a TCP listener on 88 exists but many probes see nothing. 749 is kadmin."
+
+[[signature]]
+name = "oauth2-proxy"
+kind = "auth"
+ports = [4180]
+process = ["oauth2-proxy", "oauth2_proxy"]
+health = "/ping"
+uri = "http://localhost:{port}/oauth2/start"
+
+[[signature]]
+name = "Open Policy Agent"
+kind = "auth"
+ports = [8181]
+process = ["opa"]
+health = "/health"
+uri = "http://localhost:{port}/v1/data"
+
+[[signature]]
+name = "OpenBao"
+kind = "auth"
+ports = [8200, 8201]
+process = ["bao", "openbao"]
+health = "/v1/sys/health"
+uri = "http://localhost:{port}/ui/"
+note = "Vault fork with identical ports and API, so only the process name separates the two."
+
+[[signature]]
+name = "OpenFGA"
+kind = "auth"
+ports = [8080, 8081]
+process = ["openfga"]
+health = "/healthz"
+note = "8080 is HTTP, 8081 gRPC; the optional playground binds 3000."
+
+[[signature]]
+name = "OpenLDAP"
+kind = "auth"
+ports = [389, 636]
+process = ["slapd"]
+uri = "ldap://localhost:{port}"
+note = "LDAP is client-speaks-first, so there is no banner to read; 636 is LDAPS."
+
+[[signature]]
+name = "Ory Hydra"
+kind = "auth"
+ports = [4444, 4445]
+process = ["hydra"]
+health = "/health/ready"
+uri = "http://localhost:{port}/.well-known/openid-configuration"
+note = "4444 is the public OAuth2 endpoint, 4445 the admin API; the admin port is unauthenticated by default. 4444 collides with geckodriver and Selenium Grid."
+
+[[signature]]
+name = "Ory Keto"
+kind = "auth"
+ports = [4466, 4467]
+process = ["keto"]
+health = "/health/ready"
+note = "4466 read API, 4467 write API; both serve gRPC and REST on the same port."
+
+[[signature]]
+name = "Ory Kratos"
+kind = "auth"
+ports = [4433, 4434]
+process = ["kratos"]
+health = "/health/ready"
+uri = "http://localhost:{port}/sessions/whoami"
+note = "4433 public, 4434 admin."
+
+[[signature]]
+name = "Ory Oathkeeper"
+kind = "auth"
+ports = [4455, 4456]
+process = ["oathkeeper"]
+health = "/health/ready"
+note = "4455 is the reverse proxy itself, 4456 the API and decision endpoint."
+
+[[signature]]
+name = "SpiceDB"
+kind = "auth"
+ports = [50051]
+process = ["spicedb"]
+note = "50051 is the generic gRPC port, so the process name carries the identification."
+
+[[signature]]
+name = "SuperTokens"
+kind = "auth"
+ports = [3567]
+process = ["supertokens"]
+health = "/hello"
+uri = "http://localhost:{port}/"
+note = "GET /hello returns the literal string \"Hello\" — the cheapest positive identification in this category."
+
+[[signature]]
+name = "Teleport"
+kind = "auth"
+ports = [3080, 3025, 3023, 3024]
+process = ["teleport"]
+note = "3080 web UI, 3025 auth service, 3023 proxy SSH, 3024 reverse tunnel."
+
+[[signature]]
+name = "Vault"
+kind = "auth"
+ports = [8200]
+process = ["vault"]
+health = "/v1/sys/health"
+
+[[signature]]
+name = "WSO2 Identity Server"
+kind = "auth"
+ports = [9443, 9763]
+process = ["wso2", "org.wso2.carbon.bootstrap"]
+note = "9443 HTTPS is the one actually used; 9763 is plain HTTP and often disabled."
+
+[[signature]]
+name = "ZITADEL"
+kind = "auth"
+ports = [8080]
+process = ["zitadel"]
+health = "/debug/healthz"
+uri = "http://localhost:{port}/ui/console"
+
+
+# ─── registry ────────────────────────────────────────────────────────
+
+[[signature]]
+name = "Athens"
+kind = "registry"
+ports = [3000]
+process = ["athens"]
+uri = "http://localhost:{port}/github.com/@v/list"
+note = "A Go module proxy. Port 3000 collides with almost everything; GOPROXY clients hit /<module>/@v/list, which nothing else answers."
+
+[[signature]]
+name = "ChartMuseum"
+kind = "registry"
+ports = [8080]
+process = ["chartmuseum"]
+health = "/health"
+uri = "http://localhost:{port}/index.yaml"
+note = "A Helm chart repository is just index.yaml at the root — that file's presence confirms it."
+
+[[signature]]
+name = "Confluent Schema Registry"
+kind = "registry"
+ports = [8081]
+process = ["schemaregistrymain", "schema-registry-start"]
+uri = "http://localhost:{port}/"
+note = "GET /subjects returns a JSON array — the cheapest way to tell it from anything else on 8081."
+
+[[signature]]
+name = "devpi"
+kind = "registry"
+ports = [3141]
+process = ["devpi-server", "devpi-gen-config"]
+uri = "http://localhost:{port}/root/pypi/+simple/"
+note = "Serves a PEP 503 simple index under /<user>/<index>/+simple/, not at the root."
+
+[[signature]]
+name = "Docker Registry"
+kind = "registry"
+ports = [5000]
+process = ["registry", "distribution"]
+health = "/v2/"
+uri = "http://localhost:{port}/v2/_catalog"
+note = "On macOS port 5000 is taken by the AirPlay Receiver by default, which is why local registries are so often moved. GET /v2/ returning the Docker-Distribution-Api-Version header is what confirms a real registry; it answers 401 when auth is configured."
+
+[[signature]]
+name = "Forgejo"
+kind = "registry"
+ports = [3000]
+process = ["forgejo"]
+http_title = "*Forgejo*"
+health = "/api/healthz"
+uri = "http://localhost:{port}/"
+note = "A Gitea fork with the same defaults; only the process name and the title text separate them."
+
+[[signature]]
+name = "Gerrit Code Review"
+kind = "registry"
+ports = [29418]
+process = ["gerrit", "gerritcodereview"]
+banner_text = "SSH-2.0-GerritCodeReview"
+uri = "ssh://localhost:{port}/"
+note = "29418 is unique to Gerrit and its SSH daemon announces itself in the version string, making this one of the few unambiguous identifications in the category. The web UI is a separate listener, usually 8080."
+
+[[signature]]
+name = "Gitea"
+kind = "registry"
+ports = [3000]
+process = ["gitea"]
+http_title = "*Gitea*"
+health = "/api/healthz"
+uri = "http://localhost:{port}/"
+note = "Port 3000 is heavily contested; the default APP_NAME puts \"Gitea\" in the HTML title, which is the dependable signal."
+
+[[signature]]
+name = "GitLab"
+kind = "registry"
+process = ["gitlab-workhorse", "gitlab-puma", "gitaly", "gitlab-rails"]
+http_title = "*GitLab*"
+health = "/-/health"
+note = "Omnibus publishes whatever external_url says, so there is no reliable default port; workhorse is the front process with puma behind it."
+
+[[signature]]
+name = "Gogs"
+kind = "registry"
+ports = [3000]
+process = ["gogs"]
+http_title = "*Gogs*"
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Harbor"
+kind = "registry"
+process = ["harbor-core", "harbor_core", "harbor-jobservice"]
+http_title = "Harbor*"
+health = "/api/v2.0/health"
+note = "Fronted by its own nginx on whatever port the compose file publishes, so the port is not fixed."
+
+[[signature]]
+name = "JFrog Artifactory"
+kind = "registry"
+ports = [8081, 8082]
+process = ["artifactory", "jfrog"]
+health = "/artifactory/api/system/ping"
+note = "8082 is the JFrog Platform router (UI and modern API), 8081 the legacy direct Artifactory port."
+
+[[signature]]
+name = "Karapace"
+kind = "registry"
+ports = [8081, 8082]
+process = ["karapace"]
+uri = "http://localhost:{port}/"
+note = "An open-source drop-in for Schema Registry (8081) and the Kafka REST proxy (8082); same API shapes on the same ports, so only argv separates them."
+
+[[signature]]
+name = "pypiserver"
+kind = "registry"
+ports = [8080]
+process = ["pypi-server", "pypiserver"]
+uri = "http://localhost:{port}/simple/"
+note = "8080 is shared with a great many things; the /simple/ index and the process name are what identify it."
+
+[[signature]]
+name = "Sonatype Nexus Repository"
+kind = "registry"
+ports = [8081]
+process = ["nexus", "org.sonatype.nexus"]
+http_title = "Nexus Repository Manager*"
+health = "/service/rest/v1/status"
+uri = "http://localhost:{port}/"
+note = "Hosted repositories are served under /repository/<name>/, and Docker repos are usually given their own extra connector port, chosen per repository."
+
+[[signature]]
+name = "Verdaccio"
+kind = "registry"
+ports = [4873]
+process = ["verdaccio"]
+http_title = "Verdaccio*"
+health = "/-/ping"
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "zot"
+kind = "registry"
+process = ["zot"]
+health = "/v2/"
+uri = "http://localhost:{port}/v2/_catalog"
+note = "An OCI-native registry; the port comes from its config file rather than a compiled-in default, so it varies."
+
+
+# ─── container ───────────────────────────────────────────────────────
+
+[[signature]]
+name = "Colima"
+kind = "container"
+process = ["colima"]
+
+[[signature]]
+name = "containerd"
+kind = "container"
+process = ["containerd"]
+note = "Listens on a unix socket by default; a TCP port appears only if a debug or metrics address was configured."
+
+[[signature]]
+name = "Docker"
+kind = "container"
+ports = [2375, 2376]
+process = ["dockerd", "com.docker"]
+health = "/_ping"
+
+[[signature]]
+name = "Docker Engine API"
+kind = "container"
+ports = [2375, 2376]
+process = ["dockerd", "docker-proxy"]
+health = "/_ping"
+uri = "tcp://localhost:{port}"
+note = "2375 is unauthenticated plaintext and 2376 TLS; most local installs expose neither and use only /var/run/docker.sock."
+
+[[signature]]
+name = "k3s"
+kind = "container"
+ports = [6443, 10250]
+process = ["k3s"]
+health = "/livez"
+note = "One binary hosts the API server, scheduler and kubelet, so all the control-plane ports share a process."
+
+[[signature]]
+name = "kind"
+kind = "container"
+process = ["kind", "kindest"]
+note = "The control-plane container publishes 6443 on a randomly chosen host port, so no port is predictable."
+
+[[signature]]
+name = "kubectl proxy"
+kind = "container"
+ports = [8001]
+process = ["kubectl proxy"]
+health = "/healthz"
+uri = "http://localhost:{port}/api/v1/"
+
+[[signature]]
+name = "kubelet"
+kind = "container"
+ports = [10250]
+process = ["kubelet"]
+note = "10250 is the authenticated HTTPS API; the read-only health endpoint is on 10248, bound to localhost."
+
+[[signature]]
+name = "Kubernetes API server"
+kind = "container"
+ports = [6443]
+process = ["kube-apiserver"]
+health = "/livez"
+uri = "https://localhost:{port}/"
+note = "HTTPS with a private CA, so an unauthenticated probe gets 401 rather than a page."
+
+[[signature]]
+name = "minikube"
+kind = "container"
+ports = [8443]
+process = ["minikube"]
+note = "The API server answers on 8443 inside the VM; with the docker driver the host-side port is assigned randomly."
+
+[[signature]]
+name = "Nomad"
+kind = "container"
+ports = [4646, 4647, 4648]
+process = ["nomad"]
+health = "/v1/agent/health"
+
+[[signature]]
+name = "OrbStack"
+kind = "container"
+process = ["orbstack"]
+
+[[signature]]
+name = "Podman"
+kind = "container"
+process = ["podman", "podman system service"]
+health = "/_ping"
+note = "Exposes a Docker-compatible API, but only on a unix socket unless started with an explicit tcp: address."
+
+[[signature]]
+name = "Portainer"
+kind = "container"
+ports = [9443, 9000, 8000]
+process = ["portainer"]
+http_title = "Portainer*"
+health = "/api/status"
+note = "9443 is HTTPS and the current default; 9000 is the legacy HTTP port and 8000 the Edge agent tunnel."
+
+[[signature]]
+name = "Skaffold"
+kind = "container"
+process = ["skaffold"]
+note = "Ports omitted deliberately: skaffold's RPC and HTTP API ports shift between versions and are printed at startup."
+
+[[signature]]
+name = "Telepresence"
+kind = "container"
+process = ["telepresence", "traffic-manager"]
+note = "The user and root daemons communicate over unix sockets; no stable TCP port to key on."
+
+[[signature]]
+name = "Tilt"
+kind = "container"
+ports = [10350]
+process = ["tilt"]
+http_title = "Tilt*"
+uri = "http://localhost:{port}/"
+
+
+# ─── emulator ────────────────────────────────────────────────────────
+
+[[signature]]
+name = "Android Emulator (adb)"
+kind = "emulator"
+ports = [5555]
+process = ["qemu-system", "emulator"]
+uri = "adb connect localhost:{port}"
+note = "Odd port paired with the console port below it; additional emulators use 5557, 5559, …"
+
+[[signature]]
+name = "Android Emulator Console"
+kind = "emulator"
+ports = [5554]
+process = ["qemu-system", "emulator"]
+banner_text = "Android Console:"
+uri = "telnet://localhost:{port}"
+note = "Genuinely speaks first — greets with 'Android Console:' and an auth prompt. Each extra emulator takes the next even port (5556, 5558, …)."
+
+[[signature]]
+name = "Azurite"
+kind = "emulator"
+ports = [10000, 10001, 10002]
+process = ["azurite"]
+uri = "http://127.0.0.1:{port}/devstoreaccount1"
+note = "10000 Blob, 10001 Queue, 10002 Table — three separate listeners from one process."
+
+[[signature]]
+name = "Cloud Bigtable Emulator"
+kind = "emulator"
+ports = [8086]
+process = ["cbtemulator"]
+uri = "localhost:{port}"
+note = "gRPC only, no HTTP — a browser gets nothing useful from it, and 8086 is otherwise InfluxDB's."
+
+[[signature]]
+name = "Cloud Datastore Emulator"
+kind = "emulator"
+ports = [8081]
+process = ["cloud-datastore-emulator", "gcd"]
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Cloud Firestore Emulator"
+kind = "emulator"
+ports = [8080]
+process = ["cloud-firestore-emulator", "firestore"]
+uri = "http://localhost:{port}/"
+note = "A Java emulator jar; shares 8080 with a great many web servers, so match the process name."
+
+[[signature]]
+name = "Cloud Spanner Emulator"
+kind = "emulator"
+ports = [9010, 9020]
+process = ["emulator_main", "gateway_main", "spanner-emulator"]
+uri = "localhost:{port}"
+note = "9010 is the gRPC endpoint clients use; 9020 serves the REST interface. These are the container defaults — `gcloud emulators spanner start` may remap them."
+
+[[signature]]
+name = "DynamoDB Local"
+kind = "emulator"
+ports = [8000]
+process = ["dynamodblocal", "dynamodb-local", "ddblocal"]
+uri = "http://localhost:{port}/"
+note = "Runs as a JVM, so argv contains DynamoDBLocal.jar rather than a distinct binary name. Port 8000 is shared with SurrealDB, Chroma and countless dev servers."
+
+[[signature]]
+name = "fake-gcs-server"
+kind = "emulator"
+ports = [4443]
+process = ["fake-gcs-server"]
+uri = "http://localhost:{port}/storage/v1/b"
+note = "Defaults to HTTPS on 4443 with a self-signed cert unless -scheme http is passed."
+
+[[signature]]
+name = "Firebase Data Connect Emulator"
+kind = "emulator"
+ports = [9399]
+process = ["firebase", "dataconnect"]
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Firebase Emulator Hub"
+kind = "emulator"
+ports = [4400]
+process = ["firebase", "firebase-tools"]
+uri = "http://localhost:{port}/emulators"
+note = "Machine-readable hub the CLI uses to discover running emulators; /emulators returns the live config as JSON."
+
+[[signature]]
+name = "Firebase Emulator Suite"
+kind = "emulator"
+ports = [4000, 4400]
+process = ["firebase", "firebase-tools"]
+http_title = "*Firebase*"
+note = "4000 is the UI and 4400 the emulator hub, whose /emulators endpoint returns the live config as JSON. Individual emulators default to 5001 Functions, 8080 Firestore, 8085 Pub/Sub, 9000 Realtime DB, 9099 Auth, 9199 Storage."
+
+[[signature]]
+name = "Firebase Emulator Suite UI"
+kind = "emulator"
+ports = [4000]
+process = ["firebase", "firebase-tools"]
+http_title = "*Firebase*"
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Firebase Extensions Emulator"
+kind = "emulator"
+ports = [5002]
+process = ["firebase", "firebase-tools"]
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Firebase Functions Emulator"
+kind = "emulator"
+ports = [5001]
+process = ["firebase", "functions-framework"]
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Firebase Hosting Emulator"
+kind = "emulator"
+ports = [5000]
+process = ["firebase", "firebase-tools"]
+uri = "http://localhost:{port}/"
+note = "Port 5000 is also the macOS AirPlay Receiver and Flask's default, which is why the Firebase docs suggest changing it."
+
+[[signature]]
+name = "Firebase Realtime Database Emulator"
+kind = "emulator"
+ports = [9000]
+process = ["firebase-database-emulator"]
+uri = "http://localhost:{port}/?ns=default"
+note = "Collides with MinIO's S3 port on 9000; the java -jar firebase-database-emulator argv is the tell."
+
+[[signature]]
+name = "Firebase Storage Emulator"
+kind = "emulator"
+ports = [9199]
+process = ["firebase", "firebase-tools"]
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Firebase Tasks Emulator"
+kind = "emulator"
+ports = [9499]
+process = ["firebase", "firebase-tools"]
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Gofakes3"
+kind = "emulator"
+process = ["gofakes3"]
+note = "No default port — the -listen flag is required, so match on process only."
+
+[[signature]]
+name = "Google Cloud Pub/Sub Emulator"
+kind = "emulator"
+ports = [8085]
+process = ["pubsub-emulator", "cloud-pubsub-emulator"]
+uri = "http://localhost:{port}/v1/projects/test/topics"
+note = "Started via `gcloud beta emulators pubsub start`; argv shows a java -jar cloud-pubsub-emulator path."
+
+[[signature]]
+name = "Hoverfly"
+kind = "emulator"
+ports = [8500, 8888]
+process = ["hoverfly", "hoverctl"]
+health = "/api/health"
+note = "8500 is the proxy and capture port (colliding with Consul), 8888 the admin API and UI (colliding with the SeaweedFS filer)."
+
+[[signature]]
+name = "LocalStack"
+kind = "emulator"
+ports = [4566]
+process = ["localstack"]
+health = "/_localstack/health"
+uri = "http://localhost:{port}/"
+note = "A single edge port multiplexes every emulated AWS service. The 4510-4559 external range exists but individual assignments are dynamic, so none are claimed."
+
+[[signature]]
+name = "Mockoon CLI"
+kind = "emulator"
+process = ["mockoon-cli", "mockoon"]
+note = "No port claimed: each environment file names its own, and the 3000 seen in examples comes from the sample environment."
+
+[[signature]]
+name = "MockServer"
+kind = "emulator"
+ports = [1080]
+process = ["mockserver", "mockserver-netty"]
+uri = "http://localhost:{port}/mockserver/status"
+note = "Shares 1080 with SOCKS proxies by convention and with MailCatcher/MailDev; the /mockserver control-plane paths disambiguate."
+
+[[signature]]
+name = "Moto Server"
+kind = "emulator"
+ports = [5000]
+process = ["moto_server", "moto"]
+uri = "http://localhost:{port}/"
+note = "A Python AWS mock served by Flask, hence Flask's 5000 default."
+
+[[signature]]
+name = "Pinecone Local"
+kind = "emulator"
+ports = [5080]
+process = ["pinecone-local", "pinecone"]
+uri = "http://localhost:{port}"
+note = "5080 is the index control plane; each created index is served on its own port allocated upward from 5081."
+
+[[signature]]
+name = "Prism"
+kind = "emulator"
+ports = [4010]
+process = ["prism", "@stoplight/prism"]
+uri = "http://localhost:{port}/"
+note = "Stoplight's OpenAPI mock server; the routes come entirely from the spec it was given."
+
+[[signature]]
+name = "S3Mock"
+kind = "emulator"
+ports = [9090, 9191]
+process = ["s3mock"]
+uri = "http://localhost:{port}/"
+note = "Adobe's S3Mock: 9090 HTTP, 9191 HTTPS."
+
+[[signature]]
+name = "Supabase Edge Functions"
+kind = "emulator"
+process = ["supabase_edge_runtime", "edge-runtime"]
+note = "No port claimed: it is reached through the Kong gateway on 54321 rather than bound directly on a well-known port."
+
+[[signature]]
+name = "WireMock"
+kind = "emulator"
+ports = [8080, 8443]
+process = ["wiremock", "wiremock-standalone"]
+health = "/__admin/health"
+uri = "http://localhost:{port}/__admin/mappings"
+note = "The /__admin API is the reliable fingerprint; the stub port itself returns whatever the mappings say."
+
+
+# ─── workflow ────────────────────────────────────────────────────────
+
+[[signature]]
+name = "Airflow"
+kind = "workflow"
+ports = [8793]
+process = ["airflow"]
+health = "/health"
+
+[[signature]]
+name = "Apache Airflow"
+kind = "workflow"
+ports = [8080]
+process = ["airflow", "gunicorn: master [airflow"]
+health = "/health"
+uri = "http://localhost:{port}/"
+note = "The webserver runs under gunicorn, so argv often shows gunicorn rather than airflow. Airflow 3 moved the health JSON to /api/v2/monitor/health."
+
+[[signature]]
+name = "Apache Flink"
+kind = "workflow"
+ports = [8081, 6123]
+process = ["standalonesessionclusterentrypoint", "taskmanagerrunner", "flink"]
+http_title = "Apache Flink Web Dashboard*"
+note = "The JobManager dashboard on 8081 collides with Schema Registry, Karapace and Nexus; the HTML title separates them cleanly."
+
+[[signature]]
+name = "Apache Spark"
+kind = "workflow"
+ports = [7077, 4040]
+process = ["spark.deploy.master", "spark.deploy.worker", "spark-submit", "pyspark"]
+note = "4040 is the per-application UI and shifts to 4041, 4042, … when several drivers run at once."
+
+[[signature]]
+name = "Dagster"
+kind = "workflow"
+ports = [3000]
+process = ["dagster-webserver", "dagster", "dagit"]
+http_title = "Dagster*"
+uri = "http://localhost:{port}/"
+note = "Defaults to 3000, shared with most JS dev servers; the process name is the reliable discriminator."
+
+[[signature]]
+name = "Node-RED"
+kind = "workflow"
+ports = [1880]
+process = ["node-red"]
+http_title = "Node-RED*"
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Prefect"
+kind = "workflow"
+ports = [4200]
+process = ["prefect server", "prefect"]
+http_title = "Prefect*"
+health = "/api/health"
+uri = "http://localhost:{port}/"
+note = "Shares 4200 with Angular and Ember CLI dev servers."
+
+[[signature]]
+name = "Temporal"
+kind = "workflow"
+ports = [7233]
+process = ["temporal-server", "temporal server"]
+uri = "localhost:{port}"
+note = "A gRPC frontend — an HTTP/1.1 probe gets nothing useful. The dev server (`temporal server start-dev`) puts the UI on 8233."
+
+[[signature]]
+name = "Temporal UI"
+kind = "workflow"
+ports = [8233, 8080]
+process = ["temporal-ui-server", "temporal-ui", "temporal server"]
+http_title = "Temporal*"
+note = "8233 with the CLI dev server, 8080 in the docker-compose setup."
+
+[[signature]]
+name = "Zeebe"
+kind = "workflow"
+ports = [26500]
+process = ["zeebe", "io.camunda.zeebe"]
+uri = "localhost:{port}"
+note = "The Camunda 8 gateway, gRPC only on 26500."
+
+
+# ─── ai ──────────────────────────────────────────────────────────────
+
+[[signature]]
+name = "AnythingLLM"
+kind = "ai"
+ports = [3001]
+process = ["anythingllm", "anything-llm"]
+uri = "http://localhost:{port}"
+
+[[signature]]
+name = "AUTOMATIC1111 Stable Diffusion web UI"
+kind = "ai"
+ports = [7860]
+process = ["stable-diffusion-webui"]
+http_title = "Stable Diffusion*"
+uri = "http://localhost:{port}"
+note = "Shares 7860 with every other Gradio app; the process path is the reliable tell. The REST API under /sdapi/v1 exists only with --api."
+
+[[signature]]
+name = "ComfyUI"
+kind = "ai"
+ports = [8188]
+process = ["comfyui"]
+http_title = "ComfyUI*"
+uri = "http://localhost:{port}"
+
+[[signature]]
+name = "Coqui TTS server"
+kind = "ai"
+ports = [5002]
+process = ["tts-server"]
+uri = "http://localhost:{port}"
+
+[[signature]]
+name = "Flowise"
+kind = "ai"
+ports = [3000]
+process = ["flowise"]
+uri = "http://localhost:{port}"
+note = "One of the many things on 3000 — the port alone means nothing here."
+
+[[signature]]
+name = "Fooocus"
+kind = "ai"
+ports = [7865]
+process = ["fooocus"]
+uri = "http://localhost:{port}"
+
+[[signature]]
+name = "GPT4All"
+kind = "ai"
+ports = [4891]
+process = ["gpt4all"]
+uri = "http://localhost:{port}/v1"
+note = "The API server is opt-in from the desktop app's settings."
+
+[[signature]]
+name = "InvokeAI"
+kind = "ai"
+ports = [9090]
+process = ["invokeai"]
+uri = "http://localhost:{port}"
+
+[[signature]]
+name = "Jan"
+kind = "ai"
+ports = [1337]
+uri = "http://localhost:{port}/v1"
+note = "The local API server is off by default; a running Jan desktop app does not imply a listener."
+
+[[signature]]
+name = "KoboldCpp"
+kind = "ai"
+ports = [5001]
+process = ["koboldcpp"]
+uri = "http://localhost:{port}/v1"
+
+[[signature]]
+name = "Langflow"
+kind = "ai"
+ports = [7860]
+process = ["langflow"]
+uri = "http://localhost:{port}"
+note = "Collides with Gradio-based UIs on 7860; only argv distinguishes it."
+
+[[signature]]
+name = "LibreChat"
+kind = "ai"
+ports = [3080]
+process = ["librechat"]
+uri = "http://localhost:{port}"
+
+[[signature]]
+name = "LiteLLM"
+kind = "ai"
+ports = [4000]
+process = ["litellm"]
+health = "/health/liveliness"
+uri = "http://localhost:{port}/v1"
+
+[[signature]]
+name = "llama.cpp server"
+kind = "ai"
+ports = [8080]
+process = ["llama-server", "llama.cpp"]
+health = "/health"
+uri = "http://localhost:{port}/v1"
+note = "Serves an OpenAI-compatible /v1 alongside its own /completion and /props."
+
+[[signature]]
+name = "llamafile"
+kind = "ai"
+ports = [8080]
+process = ["llamafile"]
+health = "/health"
+uri = "http://localhost:{port}/v1"
+note = "Same HTTP surface as llama.cpp server, since it embeds it; only argv tells them apart."
+
+[[signature]]
+name = "LM Studio"
+kind = "ai"
+ports = [1234]
+process = ["lm studio", "lms", "lmstudio"]
+health = "/v1/models"
+uri = "http://localhost:{port}/v1"
+note = "Also exposes a richer non-OpenAI API under /api/v0."
+
+[[signature]]
+name = "LocalAI"
+kind = "ai"
+ports = [8080]
+process = ["local-ai", "localai"]
+uri = "http://localhost:{port}/v1"
+
+[[signature]]
+name = "MLX LM server"
+kind = "ai"
+ports = [8080]
+process = ["mlx_lm.server", "mlx_lm"]
+uri = "http://localhost:{port}/v1"
+note = "macOS only; binds 127.0.0.1 by default."
+
+[[signature]]
+name = "NVIDIA NIM"
+kind = "ai"
+ports = [8000]
+process = ["nim_llm", "nim"]
+health = "/v1/health/ready"
+uri = "http://localhost:{port}/v1"
+
+[[signature]]
+name = "Ollama"
+kind = "ai"
+ports = [11434]
+process = ["ollama"]
+health = "/api/tags"
+
+[[signature]]
+name = "Open WebUI"
+kind = "ai"
+ports = [8080]
+process = ["open-webui", "open_webui"]
+http_title = "Open WebUI*"
+health = "/health"
+uri = "http://localhost:{port}"
+note = "Listens on 8080 in-process; the documented Docker run publishes it as 3000, so both are common."
+
+[[signature]]
+name = "Ray"
+kind = "ai"
+ports = [8265]
+process = ["raylet", "ray::", "gcs_server"]
+uri = "http://localhost:{port}"
+note = "8265 is the dashboard and job-submission API; Ray Serve deployments listen separately, conventionally on 8000."
+
+[[signature]]
+name = "SGLang"
+kind = "ai"
+ports = [30000]
+process = ["sglang"]
+health = "/health"
+uri = "http://localhost:{port}/v1"
+
+[[signature]]
+name = "SillyTavern"
+kind = "ai"
+ports = [8000]
+process = ["sillytavern"]
+uri = "http://localhost:{port}"
+note = "Another 8000 squatter; the node process running from a SillyTavern directory is the giveaway."
+
+[[signature]]
+name = "Text Generation Inference"
+kind = "ai"
+process = ["text-generation-launcher", "text-generation-router"]
+health = "/health"
+uri = "http://localhost:{port}/v1"
+note = "No port claimed: the launcher defaults to 3000, the official container listens on 80, and it is nearly always published as 8080."
+
+[[signature]]
+name = "text-generation-webui"
+kind = "ai"
+ports = [7860, 5000]
+process = ["text-generation-webui"]
+note = "7860 is the Gradio UI, 5000 the OpenAI-compatible API and only present with --api."
+
+[[signature]]
+name = "TorchServe"
+kind = "ai"
+ports = [8080, 8081, 8082]
+process = ["torchserve"]
+health = "/ping"
+note = "8080 inference, 8081 management, 8082 metrics; /ping only answers on 8080."
+
+[[signature]]
+name = "Triton Inference Server"
+kind = "ai"
+ports = [8000, 8001, 8002]
+process = ["tritonserver"]
+health = "/v2/health/ready"
+note = "8000 HTTP, 8001 gRPC, 8002 Prometheus metrics — one process, three listeners."
+
+[[signature]]
+name = "vLLM"
+kind = "ai"
+ports = [8000]
+process = ["vllm", "api_server"]
+health = "/health"
+uri = "http://localhost:{port}/v1"
+
+[[signature]]
+name = "Whisper ASR Webservice"
+kind = "ai"
+ports = [9000]
+process = ["whisper_asr", "asr-webservice"]
+uri = "http://localhost:{port}/docs"
+note = "The ahmetoner container; root redirects to Swagger docs."
+
+[[signature]]
+name = "whisper.cpp server"
+kind = "ai"
+ports = [8080]
+process = ["whisper-server", "whisper.cpp"]
+uri = "http://localhost:{port}/inference"
+note = "Transcription is POST multipart to /inference; a plain GET / is not a useful probe."
+
+[[signature]]
+name = "Xinference"
+kind = "ai"
+ports = [9997]
+process = ["xinference"]
+uri = "http://localhost:{port}/v1"
+
+
+# ─── notebook ────────────────────────────────────────────────────────
+
+[[signature]]
+name = "Apache Zeppelin"
+kind = "notebook"
+ports = [8080]
+process = ["zeppelin"]
+http_title = "Zeppelin*"
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Jupyter"
+kind = "notebook"
+ports = [8888]
+process = ["jupyter", "jupyter-lab", "jupyter-notebook"]
+http_title = "Jupyter*"
+health = "/api"
+
+[[signature]]
+name = "Jupyter Notebook"
+kind = "notebook"
+ports = [8888]
+process = ["jupyter-notebook", "jupyter notebook", "jupyter-server"]
+health = "/api/status"
+uri = "http://localhost:{port}/tree"
+
+[[signature]]
+name = "JupyterLab"
+kind = "notebook"
+ports = [8888]
+process = ["jupyter-lab", "jupyterlab", "jupyter lab"]
+http_title = "JupyterLab*"
+health = "/api/status"
+uri = "http://localhost:{port}/lab"
+note = "Increments to 8889, 8890, … per additional server, and usually requires a ?token= query parameter."
+
+[[signature]]
+name = "marimo"
+kind = "notebook"
+ports = [2718]
+process = ["marimo"]
+http_title = "marimo*"
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Observable Framework"
+kind = "notebook"
+process = ["observable"]
+note = "Preview server port omitted deliberately — match on the `observable preview` argv."
+
+[[signature]]
+name = "RStudio Server"
+kind = "notebook"
+ports = [8787]
+process = ["rserver", "rstudio-server"]
+http_title = "RStudio*"
+uri = "http://localhost:{port}/"
+note = "Shares 8787 with Wrangler and Readarr."
+
+[[signature]]
+name = "Voilà"
+kind = "notebook"
+ports = [8866]
+process = ["voila"]
+uri = "http://localhost:{port}/"
+
+
+# ─── debug ───────────────────────────────────────────────────────────
+
+[[signature]]
+name = "Burp Suite"
+kind = "debug"
+ports = [8080]
+process = ["burpsuite", "burp"]
+uri = "http://localhost:{port}/"
+note = "Intercepting proxy on the same 8080 as mitmproxy and countless dev servers."
+
+[[signature]]
+name = "Charles Proxy"
+kind = "debug"
+ports = [8888]
+process = ["charles"]
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Chrome DevTools Protocol"
+kind = "debug"
+ports = [9222]
+process = ["--remote-debugging-port", "chromium", "msedge", "chrome"]
+health = "/json/version"
+uri = "http://localhost:{port}/json/version"
+note = "9222 is convention, not a compiled-in default: --remote-debugging-port always takes an explicit value."
+
+[[signature]]
+name = "Dart VM Service"
+kind = "debug"
+ports = [8181]
+process = ["--enable-vm-service", "--observe", "dart"]
+uri = "http://127.0.0.1:{port}/"
+note = "8181 is the default only for `--observe`; `flutter run` picks a random port and prints it."
+
+[[signature]]
+name = "debugpy"
+kind = "debug"
+ports = [5678]
+process = ["debugpy", "ptvsd"]
+note = "5678 is debugpy's documented --listen convention rather than a hard default; the process is usually a plain python interpreter with debugpy in argv. Speaks the Debug Adapter Protocol, not HTTP."
+
+[[signature]]
+name = "Delve"
+kind = "debug"
+ports = [2345]
+process = ["dlv", "delve"]
+note = "2345 is the near-universal `--headless --listen` convention used by editor integrations; delve itself has no default port. Serves DAP or JSON-RPC depending on flags."
+
+[[signature]]
+name = "Electron"
+kind = "debug"
+ports = [9222]
+process = ["electron"]
+health = "/json/version"
+uri = "http://localhost:{port}/json/version"
+note = "Only listens when started with --remote-debugging-port; the renderer's UI comes from a separate dev server, and the main-process debugger uses Node's 9229."
+
+[[signature]]
+name = "gdbserver"
+kind = "debug"
+process = ["gdbserver"]
+note = "No default port at all — gdbserver requires an explicit host:port, so match on process only."
+
+[[signature]]
+name = "Go pprof"
+kind = "debug"
+ports = [6060]
+health = "/debug/pprof/"
+uri = "http://localhost:{port}/debug/pprof/"
+note = "6060 is the convention from the net/http/pprof docs; the profiling handlers are just as often mounted on the application's own port."
+
+[[signature]]
+name = "JDWP"
+kind = "debug"
+ports = [5005]
+process = ["jdwp"]
+
+[[signature]]
+name = "JDWP (Java Debug Wire Protocol)"
+kind = "debug"
+ports = [5005]
+process = ["agentlib:jdwp", "xrunjdwp"]
+uri = "jdwp://localhost:{port}"
+note = "The client sends the 14-byte \"JDWP-Handshake\" first and the JVM only echoes it, so nothing arrives unprompted. 5005 is the IDE convention, not a JVM default."
+
+[[signature]]
+name = "JDWP (Java debug)"
+kind = "debug"
+ports = [5005]
+process = ["-agentlib:jdwp", "jdwp"]
+note = "5005 is the near-universal IDE convention. The client sends the 14-byte \"JDWP-Handshake\" first and the server echoes it, so nothing arrives unprompted."
+
+[[signature]]
+name = "lldb-server"
+kind = "debug"
+process = ["lldb-server", "debugserver"]
+note = "Port is always supplied explicitly (--listen, or random in platform mode); never assume one."
+
+[[signature]]
+name = "mitmproxy"
+kind = "debug"
+ports = [8080, 8081]
+process = ["mitmproxy", "mitmdump", "mitmweb"]
+note = "8081 is the mitmweb UI; 8080 is the intercepting proxy and shares that port with Burp and many dev servers."
+
+[[signature]]
+name = "Node inspector"
+kind = "debug"
+ports = [9229, 9230]
+process = ["--inspect"]
+health = "/json/version"
+note = "a Node process left with --inspect is attachable by anything on this machine"
+
+[[signature]]
+name = "Node.js Inspector"
+kind = "debug"
+ports = [9229]
+process = ["--inspect", "--inspect-brk", "--inspect-wait"]
+health = "/json/version"
+uri = "http://localhost:{port}/json/version"
+note = "A plain GET / answers 'WebSockets request was expected'; /json/version returns JSON with a webSocketDebuggerUrl. Deno also defaults to 9229."
+
+[[signature]]
+name = "Proxyman"
+kind = "debug"
+ports = [9090]
+process = ["proxyman"]
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "React DevTools"
+kind = "debug"
+ports = [8097]
+process = ["react-devtools"]
+uri = "ws://localhost:{port}"
+note = "The standalone app listens on 8097 and the instrumented application connects out to it."
+
+[[signature]]
+name = "Vue DevTools"
+kind = "debug"
+ports = [8098]
+process = ["vue-devtools", "@vue/devtools"]
+uri = "ws://localhost:{port}"
+
+[[signature]]
+name = "Xdebug IDE listener"
+kind = "debug"
+ports = [9003]
+process = ["phpstorm", "xdebug"]
+note = "Roles are inverted: the IDE listens and the PHP process connects out. 9003 is Xdebug 3; Xdebug 2 used 9000, which is far too contested to claim."
+
+
+# ─── game ────────────────────────────────────────────────────────────
+
+[[signature]]
+name = "Factorio"
+kind = "game"
+ports = [34197]
+process = ["factorio"]
+note = "UDP only."
+
+[[signature]]
+name = "Minecraft (Bedrock Edition)"
+kind = "game"
+ports = [19132]
+process = ["bedrock_server"]
+note = "UDP only."
+
+[[signature]]
+name = "Minecraft (Java Edition)"
+kind = "game"
+ports = [25565]
+process = ["minecraft_server", "paper", "spigot", "purpur", "fabric-server"]
+uri = "localhost:{port}"
+note = "Runs inside a JVM, so argv is a java command line and the jar name is the only process evidence."
+
+[[signature]]
+name = "Palworld"
+kind = "game"
+ports = [8211]
+process = ["palserver"]
+note = "UDP only."
+
+[[signature]]
+name = "Project Zomboid"
+kind = "game"
+ports = [16261]
+process = ["projectzomboid"]
+
+[[signature]]
+name = "Rust (dedicated server)"
+kind = "game"
+ports = [28015]
+process = ["rustdedicated"]
+
+[[signature]]
+name = "Satisfactory"
+kind = "game"
+ports = [7777]
+process = ["factoryserver", "factorygame"]
+note = "UDP 7777; distinguish from Terraria, which uses TCP on the same number."
+
+[[signature]]
+name = "Source Dedicated Server"
+kind = "game"
+ports = [27015]
+process = ["srcds", "cs2", "hlds"]
+note = "27015 is both the game and the Steam query port for CS2, TF2, Garry's Mod and other Source titles."
+
+[[signature]]
+name = "Terraria"
+kind = "game"
+ports = [7777]
+process = ["terrariaserver", "tmodloader"]
+note = "TCP 7777, which collides with Satisfactory's UDP 7777."
+
+[[signature]]
+name = "Valheim"
+kind = "game"
+ports = [2456, 2457]
+process = ["valheim_server"]
+note = "UDP; 2456 is the game port and 2457 the Steam query port."
+
+
+# ─── mail ────────────────────────────────────────────────────────────
+
+[[signature]]
+name = "Dovecot"
+kind = "mail"
+ports = [143, 993, 110, 995]
+process = ["dovecot"]
+uri = "imap://localhost:{port}"
+note = "993 and 995 are implicit TLS, so no plaintext greeting is readable there."
+
+[[signature]]
+name = "Inbucket"
+kind = "mail"
+ports = [54324, 9000, 2500]
+process = ["inbucket"]
+http_title = "Inbucket*"
+uri = "http://localhost:{port}/"
+note = "Supabase's local mail catcher publishes its web UI on 54324; standalone Inbucket defaults to 9000 web and 2500 SMTP."
+
+[[signature]]
+name = "MailCatcher"
+kind = "mail"
+ports = [1025, 1080]
+process = ["mailcatcher"]
+http_title = "MailCatcher*"
+
+[[signature]]
+name = "MailDev"
+kind = "mail"
+ports = [1025, 1080]
+process = ["maildev"]
+http_title = "MailDev*"
+note = "Shares 1025/1080 with MailCatcher; the process name is the only reliable split."
+
+[[signature]]
+name = "MailHog"
+kind = "mail"
+ports = [1025, 8025]
+process = ["mailhog"]
+http_title = "MailHog*"
+note = "Unmaintained; a process on 1025/8025 today is far more often Mailpit."
+
+[[signature]]
+name = "Mailpit"
+kind = "mail"
+ports = [1025, 8025]
+process = ["mailpit"]
+http_title = "Mailpit*"
+health = "/api/v1/info"
+note = "1025 is SMTP, 8025 the web UI and API; the same default pair as MailHog, which it replaced."
+
+[[signature]]
+name = "Postfix"
+kind = "mail"
+ports = [25, 587]
+process = ["postfix", "smtpd"]
+banner_text = "220 "
+uri = "smtp://localhost:{port}"
+note = "SMTP genuinely speaks first with a 220 greeting. Implicit TLS on 465 is common but not enabled in a stock install, so it is not claimed."
+
+[[signature]]
+name = "smtp4dev"
+kind = "mail"
+process = ["smtp4dev"]
+http_title = "smtp4dev*"
+note = "Ports are almost always chosen by the docker run line (80 in the container, 5000 for the dotnet tool), so match on process."
+
+
+# ─── tool ────────────────────────────────────────────────────────────
+
+[[signature]]
+name = "adb server"
+kind = "tool"
+ports = [5037]
+process = ["adb"]
+uri = "tcp://127.0.0.1:{port}"
+note = "A length-prefixed text protocol; the client sends 'host:version' first, so nothing arrives unprompted."
+
+[[signature]]
+name = "Appium"
+kind = "tool"
+ports = [4723]
+process = ["appium"]
+health = "/status"
+uri = "http://localhost:{port}/"
+note = "Appium 2 dropped the /wd/hub base path; endpoints sit at the root."
+
+[[signature]]
+name = "aria2"
+kind = "tool"
+ports = [6800]
+process = ["aria2c"]
+note = "6800 carries the JSON-RPC and XML-RPC control interface, not a browsable UI."
+
+[[signature]]
+name = "Bazarr"
+kind = "tool"
+ports = [6767]
+process = ["bazarr"]
+http_title = "Bazarr*"
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "browserless"
+kind = "tool"
+ports = [3000]
+process = ["browserless"]
+uri = "ws://localhost:{port}/"
+note = "Exposes a CDP websocket for Puppeteer and Playwright connect(), plus a REST API; sharing 3000 makes the process name essential."
+
+[[signature]]
+name = "Browsersync"
+kind = "tool"
+ports = [3000, 3001]
+process = ["browser-sync", "browsersync"]
+note = "3000 serves the site, 3001 is the Browsersync control UI."
+
+[[signature]]
+name = "Ceph Manager Dashboard"
+kind = "tool"
+ports = [8443]
+process = ["ceph-mgr"]
+http_title = "Ceph*"
+uri = "https://localhost:{port}/"
+note = "HTTPS by default; collides with the WireMock HTTPS port and minikube's API server."
+
+[[signature]]
+name = "chromedriver"
+kind = "tool"
+ports = [9515]
+process = ["chromedriver"]
+health = "/status"
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "code-server"
+kind = "tool"
+ports = [8080]
+process = ["code-server"]
+http_title = "code-server*"
+health = "/healthz"
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Deluge"
+kind = "tool"
+ports = [8112, 58846]
+process = ["deluged", "deluge-web"]
+note = "8112 is deluge-web; 58846 is the daemon RPC that thin clients connect to and speaks a compressed protocol that is not worth probing."
+
+[[signature]]
+name = "dotnet watch"
+kind = "tool"
+process = ["dotnet watch"]
+note = "The watcher opens a browser-refresh WebSocket on a random port; the application it rebuilds is the Kestrel listener beside it."
+
+[[signature]]
+name = "Drizzle Studio"
+kind = "tool"
+ports = [4983]
+process = ["drizzle-kit"]
+note = "The UI is hosted remotely and talks back to the local 4983 server."
+
+[[signature]]
+name = "DuckDB UI"
+kind = "tool"
+ports = [4213]
+process = ["duckdb"]
+uri = "http://localhost:{port}/"
+note = "DuckDB itself is embedded and opens no socket; the local UI extension, started by `duckdb -ui` or CALL start_ui(), is the only thing that listens."
+
+[[signature]]
+name = "ESPHome"
+kind = "tool"
+ports = [6052]
+process = ["esphome"]
+http_title = "ESPHome*"
+note = "6052 is the dashboard; flashed devices themselves answer the native API on 6053."
+
+[[signature]]
+name = "Expo"
+kind = "tool"
+ports = [8081]
+process = ["expo start", "expo-cli", "@expo/cli"]
+health = "/status"
+uri = "http://localhost:{port}/"
+note = "Modern Expo serves through Metro on 8081; the 19000/19002/19006 ports belong to pre-SDK-49 releases."
+
+[[signature]]
+name = "geckodriver"
+kind = "tool"
+ports = [4444]
+process = ["geckodriver"]
+health = "/status"
+uri = "http://localhost:{port}/"
+note = "Shares 4444 with Selenium Grid and Ory Hydra."
+
+[[signature]]
+name = "Gradle Daemon"
+kind = "tool"
+process = ["gradledaemon", "org.gradle.launcher.daemon"]
+note = "Binds an ephemeral loopback port with no default, so identify it purely from the GradleDaemon argv."
+
+[[signature]]
+name = "Jellyseerr"
+kind = "tool"
+ports = [5055]
+process = ["jellyseerr"]
+http_title = "Jellyseerr*"
+note = "A fork of Overseerr that kept its port; the page title is the reliable discriminator."
+
+[[signature]]
+name = "Jenkins"
+kind = "tool"
+ports = [8080]
+process = ["jenkins.war", "jenkins"]
+http_title = "*[Jenkins]*"
+uri = "http://localhost:{port}/"
+note = "Also sets an X-Jenkins response header carrying the version, which is a stronger signal than the title."
+
+[[signature]]
+name = "JetBrains Built-in Server"
+kind = "tool"
+ports = [63342]
+process = ["idea", "pycharm", "webstorm", "goland", "rubymine", "phpstorm", "clion", "rider"]
+uri = "http://localhost:{port}/"
+note = "Every JetBrains IDE opens this; it answers /api/about and is the endpoint the 'open in browser' action uses."
+
+[[signature]]
+name = "Karma"
+kind = "tool"
+ports = [9876]
+process = ["karma"]
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Ladle"
+kind = "tool"
+ports = [61000]
+process = ["ladle"]
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Lidarr"
+kind = "tool"
+ports = [8686]
+process = ["lidarr"]
+http_title = "Lidarr*"
+health = "/ping"
+
+[[signature]]
+name = "LiveReload"
+kind = "tool"
+ports = [35729]
+health = "/livereload.js"
+note = "The standard LiveReload port, used by Spring Boot DevTools, Guard and several asset pipelines. The port does not say which tool opened it."
+
+[[signature]]
+name = "Memgraph Lab"
+kind = "tool"
+ports = [3000]
+process = ["memgraph-lab"]
+http_title = "Memgraph Lab*"
+uri = "http://localhost:{port}/"
+note = "Useful disambiguation for port 3000, which is otherwise dominated by Node dev servers and Grafana."
+
+[[signature]]
+name = "Metro"
+kind = "tool"
+ports = [8081]
+process = ["metro", "react-native start", "@react-native/community-cli"]
+health = "/status"
+uri = "http://localhost:{port}/"
+note = "/status returns the plain-text body `packager-status:running`, which identifies Metro unambiguously against everything else on 8081."
+
+[[signature]]
+name = "Metro Bundler"
+kind = "tool"
+ports = [8081]
+process = ["metro", "react-native", "expo"]
+health = "/status"
+uri = "http://localhost:{port}/"
+note = "/status returns the literal text 'packager-status:running', which cleanly separates Metro from everything else on 8081."
+
+[[signature]]
+name = "MinIO Console"
+kind = "tool"
+ports = [9001]
+process = ["minio", "console"]
+http_title = "MinIO*"
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "mongo-express"
+kind = "tool"
+ports = [8081]
+process = ["mongo-express"]
+http_title = "Mongo Express*"
+uri = "http://localhost:{port}/"
+note = "A web admin UI usually run beside mongod in docker-compose; distinguishes 8081 from a stray app server."
+
+[[signature]]
+name = "msedgedriver"
+kind = "tool"
+ports = [9515]
+process = ["msedgedriver"]
+health = "/status"
+uri = "http://localhost:{port}/"
+note = "Same default port as chromedriver; only argv separates them."
+
+[[signature]]
+name = "Netlify Dev"
+kind = "tool"
+ports = [8888]
+process = ["netlify"]
+uri = "http://localhost:{port}/"
+note = "Same port as Jupyter; the netlify argv is the separator."
+
+[[signature]]
+name = "Nx Graph"
+kind = "tool"
+ports = [4211]
+process = ["nx graph", "nx dep-graph"]
+uri = "http://localhost:{port}/"
+note = "The Nx daemon itself uses a unix socket; only the project-graph viewer listens on TCP."
+
+[[signature]]
+name = "NZBGet"
+kind = "tool"
+ports = [6789]
+process = ["nzbget"]
+http_title = "NZBGet*"
+
+[[signature]]
+name = "openvscode-server"
+kind = "tool"
+ports = [3000]
+process = ["openvscode-server"]
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Overseerr"
+kind = "tool"
+ports = [5055]
+process = ["overseerr"]
+http_title = "Overseerr*"
+
+[[signature]]
+name = "pgweb"
+kind = "tool"
+ports = [8081]
+process = ["pgweb"]
+http_title = "pgweb*"
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Playwright"
+kind = "tool"
+ports = [9323]
+process = ["playwright show-report", "playwright"]
+http_title = "Playwright Test Report*"
+uri = "http://localhost:{port}/"
+note = "Only `playwright show-report` has a fixed port; `--ui` and `show-trace` pick an ephemeral one."
+
+[[signature]]
+name = "Playwright Report"
+kind = "tool"
+ports = [9323]
+process = ["playwright"]
+http_title = "Playwright Test Report*"
+uri = "http://localhost:{port}/"
+note = "Only `playwright show-report` has a fixed port; trace viewer and UI mode pick random ones."
+
+[[signature]]
+name = "Playwright Server"
+kind = "tool"
+process = ["playwright run-server", "playwright launch-server"]
+uri = "ws://localhost:{port}/"
+note = "No default port — run-server requires an explicit --port."
+
+[[signature]]
+name = "Prisma Studio"
+kind = "tool"
+ports = [5555]
+process = ["prisma studio", "prisma"]
+http_title = "Prisma Studio*"
+uri = "http://localhost:{port}/"
+note = "Collides with Flower, Selenium Grid nodes and the Android emulator's adb port; the argv is what tells them apart."
+
+[[signature]]
+name = "Prowlarr"
+kind = "tool"
+ports = [9696]
+process = ["prowlarr"]
+http_title = "Prowlarr*"
+health = "/ping"
+
+[[signature]]
+name = "qBittorrent"
+kind = "tool"
+ports = [8080]
+process = ["qbittorrent"]
+http_title = "qBittorrent*"
+note = "The listening peer port is randomised at first run, so only the Web UI port is predictable."
+
+[[signature]]
+name = "Radarr"
+kind = "tool"
+ports = [7878]
+process = ["radarr"]
+http_title = "Radarr*"
+health = "/ping"
+
+[[signature]]
+name = "Readarr"
+kind = "tool"
+ports = [8787]
+process = ["readarr"]
+http_title = "Readarr*"
+health = "/ping"
+note = "Shares 8787 with RStudio Server and Wrangler."
+
+[[signature]]
+name = "RedisInsight"
+kind = "tool"
+ports = [5540]
+process = ["redisinsight", "redis-insight"]
+http_title = "RedisInsight*"
+note = "The default moved to 5540 in v2; older installs and some images still use 8001."
+
+[[signature]]
+name = "SABnzbd"
+kind = "tool"
+ports = [8080]
+process = ["sabnzbd"]
+http_title = "SABnzbd*"
+
+[[signature]]
+name = "Selenium Grid Hub"
+kind = "tool"
+ports = [4444]
+process = ["selenium-server", "selenium.jar", "selenium standalone", "selenium hub"]
+health = "/status"
+uri = "http://localhost:{port}/"
+note = "Shares 4444 with geckodriver; the java/selenium-server argv is the only reliable separator."
+
+[[signature]]
+name = "Selenium Grid Node"
+kind = "tool"
+ports = [5555]
+process = ["selenium-server", "selenium node"]
+health = "/status"
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Solargraph"
+kind = "tool"
+ports = [7658]
+process = ["solargraph"]
+uri = "tcp://localhost:{port}"
+note = "One of the few language servers with a conventional TCP port; most LSP servers speak stdio and never listen."
+
+[[signature]]
+name = "SonarQube"
+kind = "tool"
+ports = [9000]
+process = ["sonarqube", "sonar.path.home"]
+http_title = "SonarQube*"
+health = "/api/system/status"
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Sonarr"
+kind = "tool"
+ports = [8989]
+process = ["sonarr"]
+http_title = "Sonarr*"
+health = "/ping"
+note = "Shares 8989 with MariaDB MaxScale's REST API."
+
+[[signature]]
+name = "Storybook"
+kind = "tool"
+ports = [6006]
+process = ["storybook", "storybook-server"]
+http_title = "*Storybook*"
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Supabase Studio"
+kind = "tool"
+ports = [54323]
+process = ["supabase_studio", "supabase"]
+http_title = "*Supabase*"
+uri = "http://localhost:{port}/"
+
+[[signature]]
+name = "Tautulli"
+kind = "tool"
+ports = [8181]
+process = ["tautulli"]
+http_title = "Tautulli*"
+
+[[signature]]
+name = "Transmission"
+kind = "tool"
+ports = [9091, 51413]
+process = ["transmission-daemon", "transmission-gtk", "transmission"]
+http_title = "Transmission*"
+note = "9091 is the RPC and web interface, 51413 the BitTorrent peer port."
+
+[[signature]]
+name = "Vitest UI"
+kind = "tool"
+ports = [51204]
+process = ["vitest"]
+http_title = "Vitest*"
+uri = "http://localhost:{port}/__vitest__/"
+note = "The UI is mounted at /__vitest__/, not at the root."
+
+[[signature]]
+name = "webpack-bundle-analyzer"
+kind = "tool"
+ports = [8888]
+process = ["webpack-bundle-analyzer"]
+uri = "http://localhost:{port}/"
+note = "Shares 8888 with `netlify dev`, Jupyter and Charles Proxy."
+
+[[signature]]
+name = "Zigbee2MQTT"
+kind = "tool"
+ports = [8080]
+process = ["zigbee2mqtt"]
+http_title = "Zigbee2MQTT*"
+note = "The frontend only; actual device traffic goes out over MQTT to a separate broker."
+
+
+# ─── system ──────────────────────────────────────────────────────────
+
+[[signature]]
+name = "1Password"
+kind = "system"
+process = ["1password"]
+
+[[signature]]
+name = "AdGuard Home"
+kind = "system"
+ports = [53, 3000]
+process = ["adguardhome"]
+http_title = "AdGuard Home*"
+note = "3000 is the default admin UI port, worth knowing when something unexpected occupies 3000."
+
+[[signature]]
+name = "Adobe"
+kind = "system"
+process = ["adobe", "creative cloud", "adobeipcbroker"]
+
+[[signature]]
+name = "AirPlay Receiver (macOS)"
+kind = "system"
+ports = [5000, 7000]
+process = ["controlcenter", "airplayxpchelper"]
+note = "macOS binds 5000 and 7000 for AirPlay Receiver; turning it off in System Settings frees them for dev servers."
+
+[[signature]]
+name = "Apache ZooKeeper"
+kind = "system"
+ports = [2181]
+process = ["quorumpeermain", "zookeeper-server-start", "zkserver"]
+uri = "localhost:{port}"
+note = "Silent on connect; the four-letter command \"ruok\" answers \"imok\" when whitelisted. 2888/3888 are quorum ports."
+
+[[signature]]
+name = "Avahi"
+kind = "system"
+ports = [5353]
+process = ["avahi-daemon"]
+
+[[signature]]
+name = "BIND 9"
+kind = "system"
+ports = [53, 953]
+process = ["named"]
+note = "953 is rndc control."
+
+[[signature]]
+name = "chrony"
+kind = "system"
+ports = [123, 323]
+process = ["chronyd"]
+note = "323 is the local command socket, bound to localhost."
+
+[[signature]]
+name = "Consul"
+kind = "system"
+ports = [8500, 8501, 8502, 8600, 8300, 8301, 8302]
+process = ["consul"]
+http_title = "Consul*"
+health = "/v1/status/leader"
+note = "8500 HTTP API and UI, 8501 HTTPS, 8502 gRPC, 8600 DNS, 8300 server RPC, 8301/8302 Serf LAN and WAN. 8600 answers DNS rather than HTTP."
+
+[[signature]]
+name = "ControlCenter"
+kind = "system"
+ports = [5000, 7000]
+process = ["controlcenter"]
+note = "AirPlay Receiver; turn it off in Settings to free ports 5000 and 7000"
+
+[[signature]]
+name = "CoreDNS"
+kind = "system"
+ports = [53, 9153]
+process = ["coredns"]
+note = "9153 is the Prometheus metrics plugin; the health plugin listens separately on 8080, so no health path is given here."
+
+[[signature]]
+name = "CUPS"
+kind = "system"
+ports = [631]
+process = ["cupsd"]
+http_title = "*CUPS*"
+uri = "http://localhost:{port}/"
+note = "Speaks both IPP and HTTP on the same port; on macOS it is always running."
+
+[[signature]]
+name = "dnsmasq"
+kind = "system"
+ports = [53]
+process = ["dnsmasq"]
+note = "Also serves DHCP on 67/udp when configured; commonly the DNS backend inside libvirt and Pi-hole."
+
+[[signature]]
+name = "Dropbear"
+kind = "system"
+ports = [22]
+process = ["dropbear"]
+banner_text = "SSH-2.0-dropbear"
+uri = "ssh://localhost:{port}"
+
+[[signature]]
+name = "Dropbox"
+kind = "system"
+process = ["dropbox"]
+
+[[signature]]
+name = "EPMD"
+kind = "system"
+ports = [4369]
+process = ["epmd"]
+note = "The Erlang port mapper daemon, started implicitly by any distributed Erlang or Elixir node, including `iex --sname`. Speaks a small binary protocol and says nothing until asked."
+
+[[signature]]
+name = "Figma"
+kind = "system"
+process = ["figma_agent", "figma"]
+
+[[signature]]
+name = "mDNSResponder"
+kind = "system"
+ports = [5353]
+process = ["mdnsresponder"]
+note = "The macOS Bonjour daemon; it also fronts all local DNS resolution."
+
+[[signature]]
+name = "ntpd"
+kind = "system"
+ports = [123]
+process = ["ntpd"]
+
+[[signature]]
+name = "OpenSSH"
+kind = "system"
+ports = [22]
+process = ["sshd"]
+banner_text = "SSH-"
+
+[[signature]]
+name = "Pi-hole"
+kind = "system"
+ports = [53]
+process = ["pihole-ftl"]
+http_title = "Pi-hole*"
+note = "v6 embeds its own web server inside pihole-FTL; older versions served the admin UI from a separate lighttpd. The web port is too install-dependent to claim."
+
+[[signature]]
+name = "rapportd"
+kind = "system"
+process = ["rapportd"]
+
+[[signature]]
+name = "rpcbind"
+kind = "system"
+ports = [111]
+process = ["rpcbind", "portmap"]
+note = "The portmapper for NFS and other RPC services; its presence usually means an NFS server is nearby."
+
+[[signature]]
+name = "sharingd"
+kind = "system"
+process = ["sharingd"]
+
+[[signature]]
+name = "SSH"
+kind = "system"
+banner_text = "SSH-2.0-"
+uri = "ssh://localhost:{port}"
+note = "Fallback for any SSH implementation; the version string after the dash names the server."
+
+[[signature]]
+name = "systemd-resolved"
+kind = "system"
+ports = [53]
+process = ["systemd-resolved"]
+note = "Binds 127.0.0.53:53 only, so it does not conflict with a DNS server on the real interface."
+
+[[signature]]
+name = "Unbound"
+kind = "system"
+ports = [53, 8953]
+process = ["unbound"]
+note = "8953 is the unbound-control remote-control channel, TLS-wrapped and usually disabled."
+

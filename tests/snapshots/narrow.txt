@@ -1,0 +1,20 @@
+ quarry  5 listening                           updated just now
+────────────────────────────────────────────────────────────────
+╭ Services ─────────────────────╮╭ Detail ─────────────────────╮
+│ ▾ acme-api  feat/billing     1││ ● acme-api                  │
+│▌ ●  8000 pyth…api  200   31ms ││   python3 uvicorn · api ·   │
+│ ▾ acme-web  main         ✕1  2││ pid 18000                   │
+│  ●  3000 next…web  200   12ms ││                             │
+│  ▲  3001 node…api  503  8.0ms ││ ADDRESS                     │
+│ ▾ no project             ✕1  2││   http://localhost:8000  ↗  │
+│  ●  5432 postg…db  open       ││                             │
+│  ✕  6379 redis-ser…no answer  ││ HEALTH                      │
+│                               ││   ● 200 OK · 31ms           │
+│                               ││   server  test              │
+│                               ││                             │
+│                               ││ LISTENING                   │
+│                               ││   8000  127.0.0.1  loopback │
+│                               ││                             │
+│                               ││ REPOSITORY                  │
+╰───────────────────────────────╯╰─────────────────────────────╯
+ ↑↓ move  ↵ open  y copy  / filter  a all  K stop  r refresh

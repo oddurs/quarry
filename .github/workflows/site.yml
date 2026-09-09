@@ -1,0 +1,58 @@
+name: site
+
+on:
+  push:
+    branches: [main]
+    paths: ["site/**", "src/**", "themes/**", ".github/workflows/site.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # The page is built from quarry's own renderer, so the tool has to be
+      # built before the site can be.
+      - name: Render the terminal frames
+        run: ./scripts/render-site
+
+      - name: Fail if the committed frames are stale
+        run: |
+          if ! git diff --quiet -- site/src/tui; then
+            echo "::error::site/src/tui is out of date. Run ./scripts/render-site and commit the result."
+            git diff --stat -- site/src/tui
+            exit 1
+          fi
+
+      - run: npm ci --prefix site || npm install --prefix site
+      - run: npm run build --prefix site
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

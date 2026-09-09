@@ -1,0 +1,47 @@
+# The palette quarry shipped with before it learned to follow the terminal.
+# Kept so nothing is lost, and because it is a good dark theme.
+name = "Night"
+dark = true
+
+background   = "#1a1b26"
+surface      = "#1f2335"
+overlay      = "#24283b"
+
+text         = "#c0caf5"
+muted        = "#657096"
+faint        = "#414868"
+heading      = "#c0caf5"
+
+border       = "#414868"
+border_focus = "#7aa2f7"
+selection    = "#292e42"
+
+accent       = "#7aa2f7"
+secondary    = "#7dcfff"
+
+ok           = "#9ece6a"
+redirect     = "#7dcfff"
+client_error = "#e0af68"
+server_error = "#f7768e"
+open         = "#73daca"
+closed       = "#f7768e"
+unknown      = "#414868"
+
+repo         = "#bb9af7"
+folder       = "#73daca"
+generic      = "#414868"
+
+[kinds]
+web       = "#7dcfff"
+api       = "#7aa2f7"
+db        = "#bb9af7"
+cache     = "#ff9e64"
+search    = "#73daca"
+queue     = "#e0af68"
+proxy     = "#9ece6a"
+mail      = "#73daca"
+container = "#7aa2f7"
+ai        = "#bb9af7"
+tool      = "#657096"
+system    = "#414868"
+other     = "#657096"

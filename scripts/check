@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Everything CI runs, in the order that fails fastest. Run it before pushing;
+# the pre-push hook installed by scripts/install-hooks runs it for you.
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+step() { printf '\n\033[1;34m▸ %s\033[0m\n' "$1"; }
+
+step "format"
+cargo fmt --all -- --check
+
+step "lint"
+cargo clippy --all-targets --all-features -- -D warnings
+
+step "test"
+cargo test --all-targets
+
+step "binary smoke test"
+cargo build --quiet
+./target/debug/quarry --version >/dev/null
+./target/debug/quarry --help >/dev/null
+./target/debug/quarry --screenshot 100x30 >/dev/null
+
+printf '\n\033[1;32m✓ green\033[0m\n'

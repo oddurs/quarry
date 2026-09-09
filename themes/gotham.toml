@@ -1,0 +1,52 @@
+# Gotham — https://github.com/whatyouhide/gotham
+#
+# The palette is the terminal port's, with the brighter slots used where a role
+# has to carry over a dark ground rather than recede into it.
+name = "Gotham"
+dark = true
+
+background   = "#0a0f14"   # the page
+surface      = "#0c1418"   # panes, a shade above it
+overlay      = "#11202a"   # popups, which must read as floating
+
+text         = "#98d1ce"
+muted        = "#599caa"   # secondary text that still has to be read
+faint        = "#245361"   # borders, separators, things you look past
+heading      = "#d3ebe9"
+
+border       = "#0e2129"
+border_focus = "#33859d"
+selection    = "#245361"
+
+accent       = "#edb54b"   # the one warm note, used sparingly
+secondary    = "#33859d"
+
+# Health. Green and red are the two a glance depends on, so they are the two
+# with the most separation in the palette.
+ok           = "#26a98b"
+redirect     = "#33859d"
+client_error = "#d26939"
+server_error = "#c23127"
+open         = "#2aa889"
+closed       = "#c23127"
+unknown      = "#245361"
+
+# Where a project's name came from.
+repo         = "#888ca6"
+folder       = "#33859d"
+generic      = "#245361"
+
+[kinds]
+web       = "#33859d"
+api       = "#195466"
+db        = "#888ca6"
+cache     = "#d26939"
+search    = "#2aa889"
+queue     = "#edb54b"
+proxy     = "#26a98b"
+mail      = "#2aa889"
+container = "#195466"
+ai        = "#888ca6"
+tool      = "#245361"
+system    = "#11151c"
+other     = "#599caa"

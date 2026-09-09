@@ -1,0 +1,71 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  check:
+    name: fmt + clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --all-targets --all-features
+
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # lsof is the one hard runtime dependency; the discovery tests use
+      # fixtures, but --doctor and the smoke test need the real thing.
+      - name: Install lsof
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y lsof
+      - run: cargo test --all-targets
+      # The budgets in tests/performance.rs are written for a release build.
+      # The debug run above scales them; this one holds the real line.
+      - run: cargo test --release --test performance -- --nocapture
+      - name: Smoke test the binary
+        run: |
+          cargo run --quiet -- --version
+          cargo run --quiet -- --help
+          cargo run --quiet -- --plain
+          cargo run --quiet -- --screenshot 100x30
+
+  fuzz:
+    name: extended randomised run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Far more seeds than the default suite, on every pull request.
+      - run: cargo test --release --test invariants
+        env:
+          QUARRY_FUZZ_SEEDS: "4000"
+
+  msrv:
+    name: minimum supported rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.87.0
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --all-targets

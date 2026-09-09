@@ -1,0 +1,10 @@
+/target
+
+# The site's build output and dependencies. The rendered terminal frames under
+# site/src/tui are committed on purpose: CI checks them against a fresh render,
+# so a change to quarry's drawing that nobody regenerated fails the build.
+site/dist/
+site/node_modules/
+site/.astro/
+
+.DS_Store

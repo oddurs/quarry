@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Regenerate the terminal renderings the landing page is built from.
+#
+# The page shows quarry's actual output — the same drawing code, the same theme
+# files — rather than a picture of it, so the two cannot drift apart.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+cargo build --release --quiet
+out="site/src/tui"
+mkdir -p "$out"
+
+for theme in gotham night paper; do
+  # Wide, for a desktop window.
+  ./target/release/quarry --screenshot 96x27 --demo --theme "$theme" --format html \
+    > "$out/$theme-wide.html"
+  # And narrow, because a phone is a narrow terminal and quarry lays out for it.
+  ./target/release/quarry --screenshot 54x24 --demo --theme "$theme" --format html \
+    > "$out/$theme-narrow.html"
+done
+
+echo "rendered $(ls "$out" | wc -l | tr -d ' ') frames into $out"

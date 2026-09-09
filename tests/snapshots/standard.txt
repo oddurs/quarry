@@ -1,0 +1,30 @@
+ quarry  5 listening · 2 projects · 2 unhealthy                                                      updated just now
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+╭ Services ─────────────────────────────────────────────────╮╭ Detail ───────────────────────────────────────────────╮
+│ ▾ acme-api  feat/billing  acme/acme-api                  1││ ● acme-api                                            │
+│▌ ●  8000 python3 uvicorn                  api  200   31ms ││   python3 uvicorn · api · pid 18000                   │
+│ ▾ acme-web  main  acme/acme-web                      ✕1  2││                                                       │
+│  ●  3000 next-server                      web  200   12ms ││ ADDRESS                                               │
+│  ▲  3001 node worker.js                   api  503  8.0ms ││   http://localhost:8000  ↗                            │
+│ ▾ no project                                         ✕1  2││                                                       │
+│  ●  5432 postgres                          db  open       ││ HEALTH                                                │
+│  ✕  6379 redis-server                   cache  no answer  ││   ● 200 OK · 31ms                                     │
+│                                                           ││   server  test                                        │
+│                                                           ││                                                       │
+│                                                           ││ LISTENING                                             │
+│                                                           ││   8000  127.0.0.1  loopback                           │
+│                                                           ││                                                       │
+│                                                           ││ REPOSITORY                                            │
+│                                                           ││   acme-api                                            │
+│                                                           ││   path    /src/acme-api                               │
+│                                                           ││   branch  feat/billing                                │
+│                                                           ││   remote  acme/acme-api                               │
+│                                                           ││                                                       │
+│                                                           ││ PROCESS                                               │
+│                                                           ││   user    dev                                         │
+│                                                           ││   uptime  2h 0m                                       │
+│                                                           ││   usage   0.5% cpu · 64 MB rss                        │
+│                                                           ││   parent  1                                           │
+│                                                           ││   binary  /usr/bin/python3                            │
+╰───────────────────────────────────────────────────────────╯╰───────────────────────────────────────────────────────╯
+ ↑↓ move  ↵ open  y copy  / filter  a all  K stop  r refresh  ? help

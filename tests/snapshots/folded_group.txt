@@ -1,0 +1,20 @@
+ quarry  3 listening · 2 projects · 2 unhealthy                                    updated just now
+────────────────────────────────────────────────────────────────────────────────────────────────────
+╭ Services ────────────────────────────────────────╮╭ Detail ──────────────────────────────────────╮
+│ ▾ acme-api  feat/billing  acme/acme-api         1││ ▸ acme-web                                   │
+│  ●  8000 python3 uvicorn         api  200   31ms ││   2 services · 1 not answering               │
+│▌▸ acme-web  main  acme/acme-web             ✕1  2││                                              │
+│ ▾ no project                                ✕1  2││ REPOSITORY                                   │
+│  ●  5432 postgres                 db  open       ││   branch  main                               │
+│  ✕  6379 redis-server          cache  no answer  ││   remote  acme/acme-web                      │
+│                                                  ││   path    /src/acme-web                      │
+│                                                  ││                                              │
+│                                                  ││ SERVICES                                     │
+│                                                  ││   ● 3000   next-server                       │
+│                                                  ││   ▲ 3001   node worker.js                    │
+│                                                  ││                                              │
+│                                                  ││   space to expand                            │
+│                                                  ││                                              │
+│                                                  ││                                              │
+╰──────────────────────────────────────────────────╯╰──────────────────────────────────────────────╯
+ ↑↓ move  ↵ open  y copy  / filter  a all  K stop  r refresh  ? help

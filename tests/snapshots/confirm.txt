@@ -1,0 +1,20 @@
+ quarry  5 listening · 2 projects · 2 unhealthy                                    updated just now
+────────────────────────────────────────────────────────────────────────────────────────────────────
+╭ Services ────────────────────────────────────────╮╭ Detail ──────────────────────────────────────╮
+│ ▾ acme-api  feat/billing  acme/acme-api         1││ ● acme-api                                   │
+│▌ ●  8000 python3 uvicorn         api  200   31ms ││   python3 uvicorn · api · pid 18000          │
+│ ▾ acme-web  main  acme/acme-web             ✕1  2││                                              │
+│  ●  3000 next-server╭──────────────────────────────────────────────────────╮                     │
+│  ▲  3001 node worker│                                                      │ ↗                   │
+│ ▾ no project        │  Stop acme-api (pid 18000)?                          │                     │
+│  ●  5432 postgres   │  python3 on :8000                                    │                     │
+│  ✕  6379 redis-serve│                                                      │                     │
+│                     │  y confirm    n / esc cancel                         │                     │
+│                     ╰──────────────────────────────────────────────────────╯                     │
+│                                                  ││ LISTENING                                    │
+│                                                  ││   8000  127.0.0.1  loopback                  │
+│                                                  ││                                              │
+│                                                  ││ REPOSITORY                                   │
+│                                                  ││   acme-api                                   │
+╰──────────────────────────────────────────────────╯╰──────────────────────────────────────────────╯
+ ↑↓ move  ↵ open  y copy  / filter  a all  K stop  r refresh  ? help

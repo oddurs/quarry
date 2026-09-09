@@ -1,0 +1,26 @@
+ quarry  5 listening · 2 projects · 2 unhealthy                                    updated just now
+────────────────────────────────────────────────────────────────────────────────────────────────────
+╭ Services ─────╭ Keys ────────────────────────────────────────────────────────────╮───────────────╮
+│ ▾ acme-api  fe│                                                                  │               │
+│▌ ●  8000 pytho│  ↑/k, ↓/j      move between services                             │18000          │
+│ ▾ acme-web  ma│  home/g, end/G jump to the first or last                         │               │
+│  ●  3000 next-│  space/←/→     collapse or expand a project                      │               │
+│  ▲  3001 node │  ↵/o           open the URL in your browser                      │               │
+│ ▾ no project  │  y             copy the URL to the clipboard                     │               │
+│  ●  5432 postg│  /             filter by project, port, process or kind          │               │
+│  ✕  6379 redis│  esc           back out — clear the filter, close an overlay     │               │
+│               │  a             show system services too                          │               │
+│               │  r             rescan now                                        │               │
+│               │  ctrl-r        reload the config and theme                       │               │
+│               │  K             stop the process — SIGTERM, with a confirm        │               │
+│               │  X             force kill — SIGKILL, with a confirm              │               │
+│               │  d             diagnostics — what failed, and why                │               │
+│               │  m             mouse capture — off restores text selection       │               │
+│               │  ?             this help                                         │               │
+│               │  q/ctrl-c      quit                                              │               │
+│               │  click         select a row, or open the URL                     │               │
+│               │                                                                  │               │
+│               ╰──────────────────────────────────────────────────────────────────╯               │
+│                                                  ││   user    dev                                │
+╰──────────────────────────────────────────────────╯╰──────────────────────────────────────────────╯
+ ↑↓ move  ↵ open  y copy  / filter  a all  K stop  r refresh  ? help

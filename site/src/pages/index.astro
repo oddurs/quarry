@@ -1,0 +1,156 @@
+---
+import gothamWide from "../tui/gotham-wide.html?raw";
+import gothamNarrow from "../tui/gotham-narrow.html?raw";
+import nightWide from "../tui/night-wide.html?raw";
+import nightNarrow from "../tui/night-narrow.html?raw";
+import paperWide from "../tui/paper-wide.html?raw";
+import paperNarrow from "../tui/paper-narrow.html?raw";
+import "../styles/site.css";
+
+const themes = [
+  { id: "gotham", label: "Gotham", wide: gothamWide, narrow: gothamNarrow, bg: "#0a0f14", accent: "#edb54b" },
+  { id: "night", label: "Night", wide: nightWide, narrow: nightNarrow, bg: "#1a1b26", accent: "#7aa2f7" },
+  { id: "paper", label: "Paper", wide: paperWide, narrow: paperNarrow, bg: "#fbf9f4", accent: "#2a6f9e" },
+];
+
+const install = [
+  { label: "Homebrew", cmd: "brew install oddurs/tap/quarry" },
+  { label: "Cargo", cmd: "cargo install --git https://github.com/oddurs/quarry" },
+  { label: "Script", cmd: "curl -fsSL https://oddurs.github.io/quarry/install.sh | sh" },
+];
+---
+
+<!doctype html>
+<html lang="en" data-theme="gotham">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>quarry — every server running on this machine</title>
+    <meta name="description" content="A terminal dashboard for every server listening on your machine, grouped by the project it came from." />
+    <meta name="color-scheme" content="dark light" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='13' font-size='13'%3E%E2%97%88%3C/text%3E%3C/svg%3E" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;0,6..72,500;1,6..72,300&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  </head>
+
+  <body>
+    <nav class="themes" aria-label="Colour theme">
+      {themes.map((t) => (
+        <button type="button" data-set-theme={t.id} aria-label={`Use the ${t.label} theme`} style={`--disc-bg:${t.bg};--disc-accent:${t.accent}`}>
+          <span class="disc"></span>
+          <span class="name">{t.label}</span>
+        </button>
+      ))}
+    </nav>
+
+    <main>
+      <header class="masthead">
+        <h1>quarry</h1>
+        <p class="standfirst">Every server running on this machine, and whose project it came from.</p>
+      </header>
+
+      <figure class="screen">
+        {themes.map((t) => (
+          <div class="frame" data-theme-frame={t.id}>
+            <div class="wide" set:html={t.wide} />
+            <div class="narrow" set:html={t.narrow} />
+          </div>
+        ))}
+        <figcaption>
+          quarry, as it draws itself. Not a screenshot: this page is built from the
+          tool's own renderer, so the two cannot drift apart.
+        </figcaption>
+      </figure>
+
+      <section class="install">
+        <h2>Install it</h2>
+        <ul>
+          {install.map((i) => (
+            <li>
+              <span class="label">{i.label}</span>
+              <code>{i.cmd}</code>
+              <button type="button" class="copy" data-copy={i.cmd} aria-label={`Copy the ${i.label} command`}>Copy</button>
+            </li>
+          ))}
+        </ul>
+        <p class="run">
+          Then run <code>quarry</code>. Arrow keys move, <code>↵</code> opens a service
+          in your browser, <code>/</code> filters, <code>?</code> lists the rest.
+        </p>
+      </section>
+
+      <section class="prose">
+        <article>
+          <h3>It finds all of them</h3>
+          <p>
+            Listening sockets come from the kernel directly, so a scan costs about five
+            milliseconds and needs nothing installed alongside it. Unix domain sockets and
+            bound UDP ports count too — on most machines there are several hundred of those
+            and a couple of dozen ports.
+          </p>
+        </article>
+        <article>
+          <h3>It knows what they are</h3>
+          <p>
+            Five hundred–odd signatures, scored on evidence: what a service says when you
+            connect to it, the title on its own page, the program you launched, the port it
+            sits on. A port alone is a guess about a category and never a name, which is why
+            <code>quarry why 3000</code> will show you the whole ranking.
+          </p>
+        </article>
+        <article>
+          <h3>It knows whose they are</h3>
+          <p>
+            Each service is traced from its working directory back to the git repository it
+            came from. A container resolves through Compose to the directory it was built in,
+            so the container and the process land in one group. Linked worktrees group under
+            the repository they belong to, not under their own folder name.
+          </p>
+        </article>
+      </section>
+
+      <footer>
+        <a href="https://github.com/oddurs/quarry">Source</a>
+        <a href="https://github.com/oddurs/quarry/releases">Releases</a>
+        <a href="https://github.com/oddurs/quarry/blob/main/SIGNATURES.md">Teach it your own services</a>
+      </footer>
+    </main>
+
+    <script is:inline>
+      const root = document.documentElement;
+      const known = ["gotham", "night", "paper"];
+      // A link can carry a theme, so one can be shared or linked to directly.
+      const asked = new URLSearchParams(location.search).get("theme");
+      const stored = localStorage.getItem("quarry-theme");
+      const start = [asked, stored].find(function (t) { return known.indexOf(t) !== -1; });
+      if (start) root.dataset.theme = start;
+
+      function sync() {
+        const active = root.dataset.theme;
+        document.querySelectorAll("[data-set-theme]").forEach(function (button) {
+          button.setAttribute("aria-pressed", String(button.dataset.setTheme === active));
+        });
+      }
+
+      document.querySelectorAll("[data-set-theme]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          root.dataset.theme = button.dataset.setTheme;
+          localStorage.setItem("quarry-theme", button.dataset.setTheme);
+          sync();
+        });
+      });
+      sync();
+
+      document.querySelectorAll("[data-copy]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          navigator.clipboard.writeText(button.dataset.copy).then(function () {
+            const was = button.textContent;
+            button.textContent = "Copied";
+            setTimeout(function () { button.textContent = was; }, 1400);
+          });
+        });
+      });
+    </script>
+  </body>
+</html>

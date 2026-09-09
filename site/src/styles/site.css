@@ -1,0 +1,372 @@
+/* quarry — landing page.
+ *
+ * The page wears whichever quarry theme you pick, using the same colour roles
+ * the tool uses, so the switcher is a real preview rather than a decoration.
+ * Monospace appears only where the machine speaks: the terminal, and commands
+ * you are meant to type. Everything human is set in Newsreader. */
+
+:root[data-theme="gotham"] {
+  --ground: #0a0f14;
+  --surface: #0c1418;
+  --fg: #98d1ce;
+  --muted: #599caa;
+  --faint: #245361;
+  --rule: #13303a;
+  --accent: #edb54b;
+  --link: #33859d;
+  --ansi-0: #0a0f14; --ansi-1: #c23127; --ansi-2: #26a98b; --ansi-3: #edb54b;
+  --ansi-4: #195466; --ansi-5: #4e5165; --ansi-6: #33859d; --ansi-7: #98d1ce;
+  --ansi-8: #10151b; --ansi-9: #d26939; --ansi-10: #2aa889; --ansi-11: #245361;
+  --ansi-12: #093748; --ansi-13: #888ca6; --ansi-14: #599caa; --ansi-15: #d3ebe9;
+}
+
+:root[data-theme="night"] {
+  --ground: #1a1b26;
+  --surface: #1f2335;
+  --fg: #c0caf5;
+  --muted: #7f88ad;
+  --faint: #414868;
+  --rule: #2b3050;
+  --accent: #7aa2f7;
+  --link: #7dcfff;
+  --ansi-0: #1a1b26; --ansi-1: #f7768e; --ansi-2: #9ece6a; --ansi-3: #e0af68;
+  --ansi-4: #7aa2f7; --ansi-5: #bb9af7; --ansi-6: #7dcfff; --ansi-7: #c0caf5;
+  --ansi-8: #414868; --ansi-9: #f7768e; --ansi-10: #9ece6a; --ansi-11: #e0af68;
+  --ansi-12: #7aa2f7; --ansi-13: #bb9af7; --ansi-14: #73daca; --ansi-15: #ffffff;
+}
+
+:root[data-theme="paper"] {
+  --ground: #fbf9f4;
+  --surface: #f2efe6;
+  --fg: #2b2a26;
+  --muted: #6a675e;
+  --faint: #a8a496;
+  --rule: #ddd8c8;
+  --accent: #a4530d;
+  --link: #2a6f9e;
+  --ansi-0: #2b2a26; --ansi-1: #b0261f; --ansi-2: #2f7a34; --ansi-3: #9a6410;
+  --ansi-4: #2a6f9e; --ansi-5: #7a3ea0; --ansi-6: #0f7a6a; --ansi-7: #6a675e;
+  --ansi-8: #a8a496; --ansi-9: #b0261f; --ansi-10: #2f7a34; --ansi-11: #9a6410;
+  --ansi-12: #2a6f9e; --ansi-13: #7a3ea0; --ansi-14: #0f7a6a; --ansi-15: #131210;
+}
+
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+html {
+  background: var(--ground);
+  /* Nothing on this page is allowed to scroll it sideways. */
+  overflow-x: clip;
+  /* The terminal is 96 columns wide, and that sets the measure for everything
+   * else on the page. */
+  --measure: 62rem;
+}
+
+body {
+  margin: 0;
+  padding: 0 1.5rem 6rem;
+  background: var(--ground);
+  color: var(--fg);
+  font-family: Newsreader, Georgia, "Times New Roman", serif;
+  font-size: 1.0625rem;
+  line-height: 1.65;
+  font-optical-sizing: auto;
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 260ms ease, color 260ms ease;
+}
+
+main {
+  max-width: var(--measure);
+  margin: 0 auto;
+}
+
+/* ── the theme switcher ─────────────────────────────────────────────────────
+ * Three discs, each painted in its own theme's ground and accent. The control
+ * shows you the thing it does. */
+
+.themes {
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding: 1.75rem 0 0;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.themes button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.3rem 0.45rem;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--faint);
+  font: inherit;
+  font-size: 0.8125rem;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: color 180ms ease;
+}
+
+.themes .disc {
+  width: 0.72rem;
+  height: 0.72rem;
+  border-radius: 50%;
+  background: var(--disc-bg);
+  /* Two rings: the theme's own accent, and a neutral one so a disc whose
+   * ground matches the page is still visibly a disc. */
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--disc-accent) 70%, transparent),
+    0 0 0 1px var(--rule);
+  position: relative;
+  transition: box-shadow 180ms ease;
+}
+
+.themes .disc::after {
+  content: "";
+  position: absolute;
+  inset: 27%;
+  border-radius: 50%;
+  background: var(--disc-accent);
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+
+.themes .name {
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+
+.themes button:hover .name,
+.themes button:focus-visible .name,
+.themes button[aria-pressed="true"] .name { opacity: 1; }
+
+.themes button:hover,
+.themes button[aria-pressed="true"] { color: var(--muted); }
+
+.themes button[aria-pressed="true"] .disc::after { opacity: 1; }
+
+.themes button[aria-pressed="true"] .disc {
+  box-shadow:
+    inset 0 0 0 1px var(--disc-accent),
+    0 0 0 1px var(--muted);
+}
+
+/* ── masthead ───────────────────────────────────────────────────────────── */
+
+.masthead { padding: 3.5rem 0 2.75rem; }
+
+h1 {
+  margin: 0;
+  font-size: clamp(3.25rem, 9vw, 5.5rem);
+  font-weight: 300;
+  letter-spacing: -0.035em;
+  line-height: 0.95;
+  color: var(--fg);
+}
+
+.standfirst {
+  margin: 1.1rem 0 0;
+  max-width: 34ch;
+  font-size: clamp(1.15rem, 2.4vw, 1.5rem);
+  font-weight: 300;
+  font-style: italic;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+/* ── the screen ─────────────────────────────────────────────────────────── */
+
+.screen { margin: 0 0 4.5rem; }
+
+.frame {
+  /* No border of our own: the terminal draws its own frame, and a second one
+   * around it reads as a mistake. */
+  background: var(--surface);
+  border-radius: 4px;
+  padding: 1.4rem 1.5rem;
+  overflow: hidden;
+  /* The terminal is sized against this box rather than the viewport, so its
+   * own padding is already accounted for and it can never push the page
+   * sideways. */
+  container-type: inline-size;
+}
+
+.frame[data-theme-frame] { display: none; }
+:root[data-theme="gotham"] .frame[data-theme-frame="gotham"],
+:root[data-theme="night"] .frame[data-theme-frame="night"],
+:root[data-theme="paper"] .frame[data-theme-frame="paper"] { display: block; }
+
+.tui {
+  margin: 0;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 400;
+  /* 96 columns at 0.6em per character is 57.6em; the size follows the width so
+   * the frame never scrolls sideways. */
+  /* Exactly one: box-drawing glyphs fill the em box, so any leading at all
+   * opens a gap in every vertical rule and the frame falls apart. */
+  line-height: 1;
+  white-space: pre;
+  color: var(--fg);
+  tab-size: 1;
+}
+
+/* 96 columns at 0.6em of advance each is 57.6em wide; 54 columns is 32.4em.
+ * A little slack on each keeps a rounding error from clipping the last column. */
+.wide .tui { font-size: min(12.5px, calc(100cqw / 58)); }
+.narrow .tui { font-size: min(13.5px, calc(100cqw / 33)); }
+
+.narrow { display: none; }
+
+figcaption {
+  margin-top: 1.1rem;
+  max-width: 54ch;
+  font-size: 0.9375rem;
+  font-style: italic;
+  color: var(--muted);
+}
+
+/* ── install ────────────────────────────────────────────────────────────── */
+
+.install { margin: 0 0 4.5rem; }
+
+h2,
+h3 {
+  margin: 0 0 1.1rem;
+  font-weight: 400;
+  letter-spacing: -0.012em;
+  color: var(--fg);
+}
+
+h2 { font-size: 1.65rem; }
+
+.install ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--rule);
+}
+
+.install li {
+  display: grid;
+  grid-template-columns: 7.5rem 1fr auto;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.85rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.install .label {
+  font-size: 0.9375rem;
+  color: var(--muted);
+}
+
+code {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.875em;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
+.copy {
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: none;
+  padding: 0.25rem 0.65rem;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  transition: border-color 160ms ease, color 160ms ease;
+}
+
+.copy:hover,
+.copy:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.run {
+  margin: 1.35rem 0 0;
+  max-width: 56ch;
+  color: var(--muted);
+}
+
+.run code { color: var(--accent); }
+
+/* ── prose ──────────────────────────────────────────────────────────────── */
+
+.prose {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2.5rem;
+  margin: 0 0 4rem;
+}
+
+.prose h3 {
+  font-size: 1.0625rem;
+  margin-bottom: 0.5rem;
+  color: var(--accent);
+  font-weight: 400;
+}
+
+.prose p {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--muted);
+}
+
+.prose code {
+  color: var(--fg);
+  font-size: 0.8125em;
+}
+
+/* ── footer ─────────────────────────────────────────────────────────────── */
+
+footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.75rem;
+  padding-top: 1.75rem;
+  border-top: 1px solid var(--rule);
+  font-size: 0.9375rem;
+}
+
+footer a {
+  color: var(--muted);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: color 160ms ease, border-color 160ms ease;
+}
+
+footer a:hover,
+footer a:focus-visible {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+@media (max-width: 46rem) {
+  body { padding: 0 1.15rem 4.5rem; }
+  .frame { padding: 1rem 1.05rem; }
+  .wide { display: none; }
+  /* A phone is a narrow terminal, and quarry lays out for one. */
+  .narrow { display: block; }
+  .prose { grid-template-columns: 1fr; gap: 2rem; }
+  .install li { grid-template-columns: 1fr auto; }
+  .install .label { grid-column: 1 / -1; margin-bottom: -0.35rem; }
+  .masthead { padding: 2.5rem 0 2rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after { transition-duration: 0.01ms !important; }
+}
