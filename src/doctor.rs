@@ -18,7 +18,9 @@ pub struct Check {
 }
 
 pub fn run(config: &Config, config_path: Option<&std::path::Path>, theme: &Theme) -> Vec<Check> {
-    let mut checks = Vec::new();
+    // Annotated because the first push is inside a macOS-only block: without
+    // this the type is never inferred on any other platform.
+    let mut checks: Vec<Check> = Vec::new();
 
     // The path actually in use, timed. This is the one that matters.
     #[cfg(target_os = "macos")]
