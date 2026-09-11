@@ -1,0 +1,39 @@
+---
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+
+const features = [
+  {
+    title: "Finds all of them",
+    description: "Sockets come from the kernel directly.",
+    body: "A scan costs about five milliseconds and needs nothing installed alongside it. Unix domain sockets and bound UDP ports count too.",
+  },
+  {
+    title: "Knows what they are",
+    description: "Five hundred signatures, scored on evidence.",
+    body: "What a service says when you connect to it, the title on its own page, the program you launched. A port alone is a category, never a name.",
+  },
+  {
+    title: "Knows whose they are",
+    description: "Traced back to the repository.",
+    body: "Each service resolves from its working directory to the git repository it came from. Containers resolve through Compose to the same group.",
+  },
+];
+---
+
+<section id="features" class="mx-auto max-w-5xl px-6 pb-16">
+  <div class="grid gap-4 sm:grid-cols-3">
+    {
+      features.map((feature) => (
+        <Card>
+          <CardHeader>
+            <CardTitle>{feature.title}</CardTitle>
+            <CardDescription>{feature.description}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <p class="text-muted-foreground text-sm">{feature.body}</p>
+          </CardContent>
+        </Card>
+      ))
+    }
+  </div>
+</section>

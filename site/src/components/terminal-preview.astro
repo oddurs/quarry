@@ -1,0 +1,25 @@
+---
+import gothamWide from "@/tui/gotham-wide.html?raw";
+import gothamNarrow from "@/tui/gotham-narrow.html?raw";
+import nightWide from "@/tui/night-wide.html?raw";
+import nightNarrow from "@/tui/night-narrow.html?raw";
+import paperWide from "@/tui/paper-wide.html?raw";
+import paperNarrow from "@/tui/paper-narrow.html?raw";
+
+import { TerminalTabs } from "@/components/terminal-tabs";
+
+const themes = [
+  { id: "gotham", label: "Gotham", wide: gothamWide, narrow: gothamNarrow },
+  { id: "night", label: "Night", wide: nightWide, narrow: nightNarrow },
+  { id: "paper", label: "Paper", wide: paperWide, narrow: paperNarrow },
+];
+---
+
+<section id="preview" class="mx-auto max-w-5xl px-6 pb-16">
+  <TerminalTabs client:load themes={themes} />
+
+  <p class="text-muted-foreground mt-3 text-sm">
+    Rendered by quarry itself, not a screenshot. quarry uses your terminal's
+    colours; these are three of its built-in themes.
+  </p>
+</section>

@@ -1,0 +1,30 @@
+---
+import { CopyButton } from "@/components/copy-button";
+import { Card, CardContent } from "@/components/ui/card";
+
+const commands = [
+  { label: "Homebrew", value: "brew install oddurs/tap/quarry" },
+  { label: "Cargo", value: "cargo install --git https://github.com/oddurs/quarry" },
+  { label: "Script", value: "curl -fsSL https://oddurs.github.io/quarry/install.sh | sh" },
+];
+---
+
+<section id="install" class="mx-auto max-w-5xl px-6 pb-16">
+  <h2 class="text-2xl font-semibold tracking-tight">Install</h2>
+
+  <div class="mt-6 space-y-3">
+    {
+      commands.map((command) => (
+        <Card>
+          <CardContent className="flex items-center justify-between gap-4 py-4">
+            <div class="min-w-0">
+              <p class="text-muted-foreground text-sm">{command.label}</p>
+              <code class="block truncate font-mono text-sm">{command.value}</code>
+            </div>
+            <CopyButton client:visible value={command.value} />
+          </CardContent>
+        </Card>
+      ))
+    }
+  </div>
+</section>
