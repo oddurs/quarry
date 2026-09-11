@@ -1,0 +1,29 @@
+---
+import { ThemeToggle } from "@/components/theme-toggle";
+
+const links = [
+  { label: "Source", href: "https://github.com/oddurs/quarry" },
+  { label: "Releases", href: "https://github.com/oddurs/quarry/releases" },
+  { label: "Signatures", href: "https://github.com/oddurs/quarry/blob/main/SIGNATURES.md" },
+];
+---
+
+<header class="border-b">
+  <div class="mx-auto flex h-14 max-w-5xl items-center justify-between gap-4 px-6">
+    <a href="/quarry/" class="font-semibold">quarry</a>
+
+    <nav class="flex items-center gap-1">
+      {
+        links.map((link) => (
+          <a
+            href={link.href}
+            class="text-muted-foreground hover:text-foreground px-3 py-2 text-sm transition-colors"
+          >
+            {link.label}
+          </a>
+        ))
+      }
+      <ThemeToggle client:load />
+    </nav>
+  </div>
+</header>
