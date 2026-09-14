@@ -295,7 +295,8 @@ banner_ms = {banner_ms}
 
 # Keys, bound to action names. See `quarry --help` for the defaults.
 # Actions: quit refresh open copy filter toggle-all toggle-here toggle-group
-#          toggle-detail next-trouble prev-trouble stop restart force-kill
+#          toggle-detail group-by sort-by next-trouble prev-trouble stop
+#          restart force-kill
 #          diagnostics help toggle-mouse reload back
 #          down up page-down page-up first last
 [keys]

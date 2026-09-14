@@ -179,10 +179,12 @@ quarry --fix-terminal         # undo a terminal left in mouse-reporting mode
 | `enter` / `o` | open the URL in your browser |
 | click | select a row, or open the URL in the detail pane |
 | `y` | copy the URL to the clipboard |
-| `/` | filter — `:port`, `@kind`, `~project`, or any words |
+| `/` | filter — `:port`, `@kind`, `~project`, `!not`, or any words |
 | `a` | include system services |
 | `.` | narrow to the repository you are in |
 | `tab` | hide the detail pane — the list takes the width |
+| `b` | group by — project, kind, or nothing |
+| `s` | sort by — health, port, name, newest |
 | `n` / `N` | jump between services that are not answering |
 | `esc` | back out — clear the filter, close an overlay |
 | `r` | rescan now |
@@ -208,13 +210,25 @@ this, unattributed services sorted last — so a stray broken container, which i
 exactly the kind of thing that has no project, was reliably the row furthest
 down.
 
-A service that starts while quarry is watching is marked `+` for eight seconds,
-in the blank column between the selection bar and the health dot, so nothing
-shifts. One that stops leaves no row to mark, so it is said once instead.
+A service that starts while quarry is watching is highlighted for half a
+minute — its whole row on a different ground, plus a `+` in the blank column
+between the selection bar and the health dot, so nothing shifts. Half a minute
+is measured from the other end: you start a server, watch it boot, and switch
+to quarry, which is ten or fifteen seconds on a slow one. A theme that cannot
+know the terminal's ground colour keeps the marker and skips the tint, and a
+theme file can name its own with `fresh`. One that stops leaves no row to mark,
+so it is said once instead.
+
+`b` changes how the list is divided and `s` changes the order within each
+division. By project is what quarry is for, but once you are asking a different
+question the division gets in the way: "every database on this machine" wants
+them together, and a filtered list often wants no headings at all. The pane
+title says which arrangement you are in.
 
 `/` takes prefixes: `:3000` is a port, `@web` a kind, `~acme` a project, and
-anything else matches whatever it can. Several terms narrow together — `~acme
-@web` is this project's web servers.
+anything else matches whatever it can. `!` turns a term inside out. Several
+terms narrow together — `~acme @web` is this project's web servers, `@db !~acme`
+is every database that is not this project's.
 
 ### Stopping and restarting
 

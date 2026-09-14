@@ -1,4 +1,4 @@
- quarry  1 listening · 0 projects · 1 unhealthy · filter “redis”                                     updated just now
+ quarry  1 listening · 0 projects · 1 unhealthy · “redis” · 4 hidden                                 updated just now
 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 ╭ Services ────────────────────────────────────────────────────────────╮╭ Detail ────────────────────────────────────╮
 │ ▾ no project                                                    ✕1  1││ ✕ redis-server                             │

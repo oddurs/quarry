@@ -150,8 +150,15 @@ fn draw_titlebar(f: &mut Frame, app: &App, t: &Theme, area: Rect, tick: usize) {
     }
     if !app.search.is_empty() && roomy {
         left.push(Span::styled(" · ", Style::default().fg(t.faint)));
+        // With what it is hiding. "3 listening" beside a filter is ambiguous
+        // between a quiet machine and a narrow filter, and those two call for
+        // opposite reactions.
+        let hidden = app.servers.len().saturating_sub(services);
         left.push(Span::styled(
-            format!("filter “{}”", app.search),
+            match hidden {
+                0 => format!("“{}”", app.search),
+                n => format!("“{}” · {n} hidden", app.search),
+            },
             Style::default().fg(t.client_error),
         ));
     }
@@ -204,10 +211,22 @@ fn draw_list(f: &mut Frame, app: &mut App, t: &Theme, area: Rect) {
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(t.faint))
-        .title(Line::from(vec![Span::styled(
-            " Services ",
-            Style::default().fg(t.text).bold(),
-        )]));
+        .title(Line::from({
+            let mut title = vec![Span::styled(
+                " Services ",
+                Style::default().fg(t.text).bold(),
+            )];
+            // A mode you cannot see you are in is a bug report waiting to
+            // happen, and the pane's own title is where it belongs: beside the
+            // thing it rearranged, not in a status bar across the screen.
+            if let Some(how) = app.arrangement() {
+                title.push(Span::styled(
+                    format!("· {how} "),
+                    Style::default().fg(t.faint),
+                ));
+            }
+            title
+        }));
 
     if app.rows.is_empty() {
         let msg = if app.servers.is_empty() {
@@ -265,14 +284,23 @@ fn draw_list(f: &mut Frame, app: &mut App, t: &Theme, area: Rect) {
                 Row::Group(g) => group_line(app, t, *g, row_width, selected),
                 Row::Server(s) => server_line(&app.servers[*s], t, row_width, selected),
             };
+            // Never both: two highlights on one line is one too many, and the
+            // cursor is the one that has to win.
+            let fresh = !selected
+                && matches!(row, Row::Server(i) if is_fresh(&app.servers[*i]))
+                && t.tints_arrivals();
             // Reverse video inverts whatever colour it finds, so a row of many
             // colours becomes a bar striped in as many. Flattened first, it
             // becomes what every terminal list looks like: one solid block.
-            ListItem::new(if selected && t.selection_inverts() {
+            let item = ListItem::new(if selected && t.selection_inverts() {
                 flatten(line)
             } else {
                 line
-            })
+            });
+            match t.fresh().filter(|_| fresh) {
+                Some(style) => item.style(style),
+                None => item,
+            }
         })
         .collect();
 
@@ -345,7 +373,8 @@ fn group_line(app: &App, t: &Theme, idx: usize, width: usize, selected: bool) ->
     let g = &app.groups[idx];
     let collapsed = app.collapsed.contains(&g.key);
     let name = match g.source {
-        GroupSource::Unattributed => "no project".to_string(),
+        GroupSource::Unattributed if g.describes_a_project => "no project".to_string(),
+        _ if !g.describes_a_project => g.key.clone(),
         GroupSource::System => "system services".to_string(),
         _ => g.key.clone(),
     };
@@ -411,16 +440,23 @@ fn group_line(app: &App, t: &Theme, idx: usize, width: usize, selected: bool) ->
     Line::from(spans)
 }
 
-/// How long a newly-appeared service is marked as new. Long enough to catch
-/// your eye on the way back from starting it, short enough that the screen is
-/// not permanently decorated.
-const FRESH: Duration = Duration::from_secs(8);
+/// How long a newly-appeared service stays highlighted.
+///
+/// Measured from the other end: you start a server, watch it boot, and switch
+/// to quarry. That is ten or fifteen seconds on a slow one, so anything much
+/// shorter is a highlight you arrive too late to see.
+const FRESH: Duration = Duration::from_secs(30);
+
+/// Has this appeared recently enough to still be worth pointing at?
+fn is_fresh(s: &Server) -> bool {
+    s.appeared.is_some_and(|at| at.elapsed() < FRESH)
+}
 
 fn server_line(s: &Server, t: &Theme, width: usize, selected: bool) -> Line<'static> {
     let (dot, dot_color) = (s.health.glyph(), t.health(&s.health));
     // The column between the selection bar and the health dot was already a
     // blank space, so marking an arrival costs no width and shifts nothing.
-    let fresh = if s.appeared.is_some_and(|at| at.elapsed() < FRESH) {
+    let fresh = if is_fresh(s) {
         Span::styled("+", Style::default().fg(t.accent).bold())
     } else {
         Span::raw(" ")

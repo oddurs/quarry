@@ -9,7 +9,7 @@ use ratatui::layout::Rect;
 use crate::diag;
 use crate::keys::{Command, Keymap};
 use crate::lifecycle::{Op, Target};
-use crate::model::{GroupSource, Health, Query, Rules, Scope, Server};
+use crate::model::{GroupBy, GroupSource, Health, Query, Rules, Scope, Server, SortBy};
 use crate::signature::{Evidence, Registry};
 use crate::theme::Theme;
 
@@ -57,6 +57,11 @@ pub enum ToastKind {
 pub struct Group {
     pub key: String,
     pub source: GroupSource,
+    /// Whether `source` says anything about this heading. Grouped by kind, the
+    /// key is the whole name — and the source belongs to whichever member
+    /// sorted first, which would have rendered two different kinds as "no
+    /// project" because neither had one.
+    pub describes_a_project: bool,
     pub branch: Option<String>,
     pub remote: Option<String>,
     pub count: usize,
@@ -102,6 +107,9 @@ pub struct App {
     /// Whether the detail pane is on screen. The list is what you read; the
     /// detail is what you look up, so it can get out of the way.
     pub detail: bool,
+    /// How the list is divided, and the order within each division.
+    pub group_by: GroupBy,
+    pub sort_by: SortBy,
     pub show_all: bool,
     /// The repository quarry was started in, if it was started in one. Found
     /// once: the working directory cannot change while it runs.
@@ -165,6 +173,8 @@ impl App {
             search: String::new(),
             searching: false,
             detail: true,
+            group_by: GroupBy::default(),
+            sort_by: SortBy::default(),
             show_all: false,
             scope: None,
             here: false,
@@ -430,21 +440,29 @@ impl App {
         // by project would produce a single heap. The branch is what tells two
         // of them apart, and it is what a person calls a worktree.
         let scoped = self.scoped().is_some();
+        let flat = self.group_by == GroupBy::Nothing;
         let keys: Vec<String> = self
             .servers
             .iter()
-            .map(|s| {
-                if scoped {
-                    s.worktree_key()
-                } else {
-                    s.group_key()
-                }
+            .map(|s| match self.group_by {
+                GroupBy::Kind => s.kind.label().to_string(),
+                // One key for everything: the rows still sort as one run, and
+                // the heading is simply never emitted.
+                GroupBy::Nothing => String::new(),
+                GroupBy::Project if scoped => s.worktree_key(),
+                GroupBy::Project => s.group_key(),
             })
             .collect();
+        // Where the name came from only orders groups by project. Grouped by
+        // kind, or not at all, it would shuffle rows for a reason that is not
+        // on screen.
         let ranks: Vec<u8> = self
             .servers
             .iter()
-            .map(|s| s.group_source().rank())
+            .map(|s| match self.group_by {
+                GroupBy::Project => s.group_source().rank(),
+                _ => 0,
+            })
             .collect();
 
         // Parsed once here rather than once per service per keystroke.
@@ -464,22 +482,27 @@ impl App {
             }
         }
         let calm = |i: usize| !troubled.contains(keys[i].as_str());
+        let sort_by = self.sort_by;
+        let within = |a: usize, b: usize| {
+            let (x, y) = (&self.servers[a], &self.servers[b]);
+            match sort_by {
+                SortBy::Health => x.health.rank().cmp(&y.health.rank()),
+                SortBy::Port => std::cmp::Ordering::Equal,
+                SortBy::Name => x.service_name().cmp(&y.service_name()),
+                // Reversed: the one you just started is the one you are
+                // looking for, and it is the last to have been started.
+                SortBy::Newest => y.started_at.cmp(&x.started_at),
+            }
+            // Port always breaks the tie, so the order is total and the list
+            // does not reshuffle between two equal rows on every scan.
+            .then_with(|| x.primary_port().cmp(&y.primary_port()))
+        };
         indices.sort_by(|a, b| {
             calm(*a)
                 .cmp(&calm(*b))
                 .then_with(|| ranks[*a].cmp(&ranks[*b]))
                 .then_with(|| keys[*a].cmp(&keys[*b]))
-                .then_with(|| {
-                    self.servers[*a]
-                        .health
-                        .rank()
-                        .cmp(&self.servers[*b].health.rank())
-                })
-                .then_with(|| {
-                    self.servers[*a]
-                        .primary_port()
-                        .cmp(&self.servers[*b].primary_port())
-                })
+                .then_with(|| within(*a, *b))
         });
 
         self.groups.clear();
@@ -490,22 +513,32 @@ impl App {
         let mut current: Option<&str> = None;
         for i in indices {
             let key = keys[i].as_str();
+            // Flat means no headings at all, not one heading over everything.
+            if flat {
+                self.rows.push(Row::Server(i));
+                continue;
+            }
             if current != Some(key) {
                 let repo = self.servers[i].repo.clone();
+                // A heading only speaks for a project when the grouping is by
+                // project. Grouped by kind it belongs to whichever service
+                // happened to sort first, which is nobody.
+                let by_project = self.group_by == GroupBy::Project;
                 self.groups.push(Group {
                     key: keys[i].clone(),
                     source: self.servers[i].group_source(),
+                    describes_a_project: by_project,
                     // Scoped, the key is already the branch and the remote is
                     // the same for every group. Printing either again would be
                     // noise on every row.
                     branch: repo
                         .as_ref()
                         .and_then(|r| r.branch.clone())
-                        .filter(|_| !scoped),
+                        .filter(|_| by_project && !scoped),
                     remote: repo
                         .as_ref()
                         .and_then(|r| r.remote.clone())
-                        .filter(|_| !scoped),
+                        .filter(|_| by_project && !scoped),
                     count: 0,
                     trouble: 0,
                 });
@@ -733,6 +766,52 @@ impl App {
         }
     }
 
+    /// Cycle how the list is divided. Reports the new arrangement, because
+    /// the change is easy to miss on a machine with one project.
+    pub fn cycle_group_by(&mut self) {
+        self.group_by = self.group_by.next();
+        let text = match self.group_by {
+            GroupBy::Nothing => "one flat list".to_string(),
+            other => format!("grouped by {}", other.name()),
+        };
+        // Folding is remembered by group key, and the keys are different in
+        // every arrangement. Carrying them across means a group folding itself
+        // because something with the same name was folded two modes ago.
+        self.collapsed.clear();
+        self.rebuild();
+        self.toast(text, ToastKind::Info);
+    }
+
+    pub fn cycle_sort_by(&mut self) {
+        self.sort_by = self.sort_by.next();
+        let text = match self.sort_by {
+            SortBy::Newest => "newest first".to_string(),
+            other => format!("sorted by {}", other.name()),
+        };
+        self.rebuild();
+        self.toast(text, ToastKind::Info);
+    }
+
+    /// What the list pane calls itself: the arrangement, when it is not the
+    /// default one. A mode you cannot see you are in is a bug report waiting
+    /// to happen.
+    pub fn arrangement(&self) -> Option<String> {
+        let group = (self.group_by != GroupBy::default()).then(|| match self.group_by {
+            GroupBy::Nothing => "ungrouped".to_string(),
+            other => format!("by {}", other.name()),
+        });
+        let sort = (self.sort_by != SortBy::default()).then(|| match self.sort_by {
+            SortBy::Newest => "newest first".to_string(),
+            other => format!("{} order", other.name()),
+        });
+        match (group, sort) {
+            (None, None) => None,
+            (Some(g), None) => Some(g),
+            (None, Some(s)) => Some(s),
+            (Some(g), Some(s)) => Some(format!("{g}, {s}")),
+        }
+    }
+
     /// The scope, if one was found *and* is being applied.
     pub fn scoped(&self) -> Option<&Scope> {
         self.here.then_some(self.scope.as_ref()).flatten()
@@ -952,6 +1031,8 @@ impl App {
             Command::Reload => return Action::Reload,
             Command::ToggleHere => self.toggle_here(),
             Command::ToggleDetail => self.detail = !self.detail,
+            Command::GroupBy => self.cycle_group_by(),
+            Command::SortBy => self.cycle_sort_by(),
             Command::NextTrouble => self.jump_to_trouble(true),
             Command::PrevTrouble => self.jump_to_trouble(false),
             Command::Stop => self.ask(Op::Stop),
@@ -1029,7 +1110,12 @@ impl App {
                 _ => {}
             }
         }
-        let counted: usize = self.groups.iter().map(|g| g.count).sum();
+        // Flat has no groups to count, so the rows carry the number instead.
+        let counted: usize = if self.group_by == GroupBy::Nothing {
+            self.rows.len()
+        } else {
+            self.groups.iter().map(|g| g.count).sum()
+        };
         let query = Query::parse(&self.search);
         let visible = self
             .servers

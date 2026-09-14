@@ -14,6 +14,7 @@ heading      = "#131210"
 border       = "#d9d5c8"
 border_focus = "#2a6f9e"
 selection    = "#e6e1d2"
+fresh        = "#e3eddc"   # a service that has just appeared, for half a minute
 
 accent       = "#2a6f9e"
 secondary    = "#0f7a6a"

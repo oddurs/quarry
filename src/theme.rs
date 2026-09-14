@@ -70,6 +70,12 @@ pub struct Theme {
     /// Draw the selected row in reverse video instead of on `selection`. The
     /// only way to mark a row legibly when the ground colour is unknown.
     pub selection_reverse: bool,
+    /// The ground under a service that has just appeared.
+    ///
+    /// `None` where the ground colour is not ours to know — a tint over an
+    /// unknown background is either invisible or illegible, and the marker in
+    /// the gutter carries the same news without the risk.
+    pub fresh: Option<Color>,
 
     // Text.
     pub text: Color,
@@ -118,6 +124,21 @@ impl Theme {
         } else {
             Style::default().bg(self.selection)
         }
+    }
+
+    /// The style for a row that has just appeared, where the theme has a
+    /// colour for it. Never applied to the selected row: two highlights on one
+    /// line is one too many, and the cursor has to win.
+    pub fn fresh(&self) -> Option<Style> {
+        self.fresh.map(|bg| Style::default().bg(bg))
+    }
+
+    /// Whether a tint is available at all. Where it is not, the marker in the
+    /// gutter is the whole of the news — deliberately, rather than falling
+    /// back to bold: bolding a row nudges every glyph in it, which is the same
+    /// reason the selected row is not bold either.
+    pub fn tints_arrivals(&self) -> bool {
+        self.fresh.is_some()
     }
 
     /// Whether the selected row is drawn by inverting it.
@@ -171,6 +192,7 @@ impl Theme {
             border_focus: Color::Blue,
             selection: Color::Reset,
             selection_reverse: true,
+            fresh: None,
             text: Color::Reset,
             muted: Color::Gray,
             faint: Color::DarkGray,
@@ -234,6 +256,7 @@ impl Theme {
             border_focus: r,
             selection: r,
             selection_reverse: true,
+            fresh: None,
             text: r,
             muted: r,
             faint: r,
@@ -293,6 +316,11 @@ impl Theme {
         );
         if let Some(dark) = file.dark {
             self.dark = dark;
+        }
+        // Not in `set!`: the field is optional in the theme as well as in the
+        // file, because "no tint" is a meaningful answer rather than a gap.
+        if let Some(v) = file.fresh.as_deref().and_then(parse_color) {
+            self.fresh = Some(v);
         }
         if let Some(rev) = file.selection_reverse {
             self.selection_reverse = rev;
@@ -392,6 +420,10 @@ impl Theme {
             border: slot(8),
             border_focus: pick(12, 4),
             selection: keys.get("selection").cloned().or_else(|| slot(8)),
+            // No tint. Sixteen ANSI slots hold no muted green, and the two
+            // that are close — the selection colour and bright black — are
+            // already spoken for by the cursor. An arrival keeps its marker.
+            fresh: None,
             selection_reverse: Some(false),
             text: foreground.clone(),
             muted: pick(15, 7),
@@ -622,6 +654,7 @@ struct ThemeFile {
     border: Option<String>,
     border_focus: Option<String>,
     selection: Option<String>,
+    fresh: Option<String>,
     text: Option<String>,
     muted: Option<String>,
     faint: Option<String>,

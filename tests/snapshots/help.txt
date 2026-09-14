@@ -11,6 +11,8 @@
 │  ●  8000 pytho│  a             show system services too                          │               │
 │               │  .             narrow to the repository you are in               │               │
 │               │  tab           hide the detail pane — the list takes the width   │               │
+│               │  b             group by — project, kind, or nothing              │               │
+│               │  s             sort by — health, port, name, newest              │               │
 │               │  n, N          jump between services that are not answering      │               │
 │               │  r             rescan now                                        │               │
 │               │  ctrl-r        reload the config and theme                       │               │
@@ -20,7 +22,5 @@
 │               │  d             diagnostics — what failed, and why                │               │
 │               │  m             mouse capture — off restores text selection       │               │
 │               │  ?             this help                                         │               │
-│               │  q/ctrl-c      quit                                              │               │
-│               │  click         select a row, or open the URL                     │               │
 ╰───────────────╰──────────────────────────────────────────────────────────────────╯───────────────╯
  ↑↓ move  ↵ open  y copy  / filter  a all  . here  K stop  R restart  r refresh  ? help

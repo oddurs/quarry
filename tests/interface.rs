@@ -248,3 +248,246 @@ mod filtering {
         assert!(Query::parse("  @  ~ ").is_empty());
     }
 }
+
+mod arranging {
+    use super::*;
+    use quarry::model::{GroupBy, SortBy};
+
+    fn keys(app: &App) -> Vec<String> {
+        app.groups.iter().map(|g| g.key.clone()).collect()
+    }
+
+    #[test]
+    fn grouping_cycles_and_says_which_way_round_it_is() {
+        let mut app = App::new();
+        app.ingest(machine());
+        assert_eq!(app.group_by, GroupBy::Project);
+        assert_eq!(keys(&app), vec!["unattributed", "acme-web"]);
+
+        app.run(Command::GroupBy);
+        assert_eq!(app.group_by, GroupBy::Kind);
+        assert_eq!(keys(&app), vec!["metrics", "db", "web"]);
+        assert!(app.toast.as_ref().expect("a toast").0.contains("kind"));
+
+        app.run(Command::GroupBy);
+        assert_eq!(app.group_by, GroupBy::Nothing);
+        assert!(keys(&app).is_empty(), "flat means no headings at all");
+        assert_eq!(ports(&app).len(), 3, "every service is still there");
+
+        app.run(Command::GroupBy);
+        assert_eq!(app.group_by, GroupBy::Project, "it comes back round");
+    }
+
+    /// Folds are remembered by key, and the keys differ in every arrangement.
+    /// Carried across, a group folds itself because something with the same
+    /// name was folded two modes ago.
+    #[test]
+    fn regrouping_forgets_what_was_folded() {
+        let mut app = App::new();
+        app.ingest(machine());
+        app.collapsed.insert("acme-web".to_string());
+        app.rebuild();
+        assert_eq!(ports(&app).len(), 1);
+
+        app.run(Command::GroupBy);
+        assert!(app.collapsed.is_empty());
+        assert_eq!(ports(&app).len(), 3);
+    }
+
+    #[test]
+    fn sorting_reorders_within_a_group() {
+        let mut app = App::new();
+        app.group_by = GroupBy::Nothing;
+        app.ingest(vec![
+            server(8080, "node").service("Zulu").build(),
+            server(3000, "node").service("Alpha").build(),
+            server(5000, "node").service("Mike").build(),
+        ]);
+        assert_eq!(app.sort_by, SortBy::Health);
+        assert_eq!(
+            ports(&app),
+            vec![3000, 5000, 8080],
+            "health ties break on port"
+        );
+
+        app.run(Command::SortBy);
+        assert_eq!(app.sort_by, SortBy::Port);
+        assert_eq!(ports(&app), vec![3000, 5000, 8080]);
+
+        app.run(Command::SortBy);
+        assert_eq!(app.sort_by, SortBy::Name);
+        assert_eq!(ports(&app), vec![3000, 5000, 8080], "Alpha, Mike, Zulu");
+    }
+
+    /// Without a total order the list reshuffles between two equal rows on
+    /// every scan, which looks like the machine is churning when it is not.
+    #[test]
+    fn every_order_is_total() {
+        let mut app = App::new();
+        app.group_by = GroupBy::Nothing;
+        let same = || {
+            vec![
+                server(8080, "node").service("Same").build(),
+                server(3000, "node").service("Same").build(),
+            ]
+        };
+        for _ in 0..SortBy::ALL.len() {
+            app.run(Command::SortBy);
+            app.ingest(same());
+            let first = ports(&app);
+            app.ingest(same());
+            assert_eq!(first, ports(&app), "unstable under {:?}", app.sort_by);
+            assert_eq!(first, vec![3000, 8080], "port has to break the tie");
+        }
+    }
+
+    #[test]
+    fn the_pane_says_which_arrangement_it_is_in() {
+        let mut app = App::new();
+        assert_eq!(app.arrangement(), None, "the default needs no explaining");
+        app.run(Command::GroupBy);
+        assert_eq!(app.arrangement().as_deref(), Some("by kind"));
+        app.run(Command::SortBy);
+        assert_eq!(app.arrangement().as_deref(), Some("by kind, port order"));
+    }
+}
+
+mod highlighting {
+    use super::*;
+
+    /// Deliberately small, and read through the background map rather than
+    /// the text: a pid like 14000 appears in the detail pane as well as the
+    /// row, and matching on the digits found the wrong one.
+    fn arrived(theme: &str) -> App {
+        let mut app = App::new();
+        app.theme = quarry::theme::Theme::resolve(theme).expect("theme resolves");
+        app.ingest(vec![server(3000, "node").service("Alpha").build()]);
+        app.ingest(vec![
+            server(3000, "node").service("Alpha").build(),
+            server(4000, "node").service("Bravo").build(),
+        ]);
+        app
+    }
+
+    /// The ground under the row for a given port.
+    fn ground_of(app: &mut App, port: u16) -> String {
+        let at = app
+            .rows
+            .iter()
+            .position(|r| matches!(r, Row::Server(i) if app.servers[*i].primary_port() == port))
+            .expect("a row for that port");
+        let map = quarry::ui::render_background_to_string(app, 60, 10, 0);
+        map.lines()
+            .skip_while(|l| !l.is_empty())
+            .filter(|l| !l.is_empty())
+            // Past the title, the rule and the pane's top border.
+            .nth(3 + at)
+            .expect("that row is on screen")
+            .to_string()
+    }
+
+    /// "Highlight" has to mean more than one character of gutter: the row of a
+    /// service that just appeared sits on its own ground, edge to edge.
+    #[test]
+    fn an_arrival_gets_its_own_ground() {
+        let mut app = arrived("gotham");
+        app.selected = 0;
+        let new = ground_of(&mut app, 4000);
+        let old = ground_of(&mut app, 3000);
+        assert_ne!(new, old, "both rows are on the same ground");
+
+        let tint = new.trim_matches('a');
+        assert!(!tint.is_empty(), "the arrival has no ground of its own");
+        assert_eq!(
+            tint.chars().collect::<std::collections::HashSet<_>>().len(),
+            1,
+            "the tint stops short of the edge: {new:?}"
+        );
+    }
+
+    /// Two highlights on one line is one too many, and the cursor has to win.
+    #[test]
+    fn the_cursor_beats_the_highlight() {
+        let mut app = arrived("gotham");
+        app.selected = 0;
+        let unselected = ground_of(&mut app, 4000);
+
+        app.selected = app
+            .rows
+            .iter()
+            .position(|r| matches!(r, Row::Server(i) if app.servers[*i].primary_port() == 4000))
+            .expect("a row for it");
+        let selected = ground_of(&mut app, 4000);
+        assert_ne!(selected, unselected, "selection did not override the tint");
+    }
+
+    /// A theme that cannot know the ground colour must not tint it. The marker
+    /// in the gutter carries the same news without the risk.
+    #[test]
+    fn a_theme_with_no_ground_of_its_own_only_marks_it() {
+        let mut app = arrived("mono");
+        app.selected = 0;
+        assert!(!app.theme.tints_arrivals());
+        assert_eq!(
+            ground_of(&mut app, 4000),
+            ground_of(&mut app, 3000),
+            "mono tinted a row it cannot see"
+        );
+
+        let screen = quarry::ui::render_to_string(&mut app, 60, 10, 0);
+        let row = screen
+            .lines()
+            .find(|l| l.contains("Bravo"))
+            .expect("the new row");
+        assert!(row.contains('+'), "no marker either: {row:?}");
+    }
+
+    /// Half a minute, measured from the other end: you start a server, watch
+    /// it boot, and switch to quarry.
+    #[test]
+    fn the_highlight_outlasts_switching_windows() {
+        let mut app = arrived("gotham");
+        app.selected = 0;
+        let still_lit = ground_of(&mut app, 4000);
+
+        // Wind the clock back by pretending it appeared a minute ago.
+        for s in app.servers.iter_mut() {
+            if let Some(at) = s.appeared {
+                s.appeared = at.checked_sub(Duration::from_secs(60));
+            }
+        }
+        let faded = ground_of(&mut app, 4000);
+        assert_ne!(still_lit, faded, "the highlight never goes out");
+        assert_eq!(
+            faded,
+            ground_of(&mut app, 3000),
+            "and it faded to the usual ground"
+        );
+    }
+}
+
+mod excluding {
+    use super::*;
+
+    fn matching(text: &str) -> Vec<u16> {
+        let q = Query::parse(text);
+        machine()
+            .into_iter()
+            .filter(|s| s.satisfies(&q))
+            .map(|s| s.primary_port())
+            .collect()
+    }
+
+    #[test]
+    fn a_term_can_be_turned_inside_out() {
+        assert_eq!(matching("!@db"), vec![3000, 16686]);
+        assert_eq!(matching("!:16686"), vec![3000, 5432]);
+        assert_eq!(matching("~acme !@web"), vec![5432]);
+    }
+
+    #[test]
+    fn a_bare_negation_is_not_a_term() {
+        assert!(Query::parse("!").is_empty());
+        assert!(Query::parse("! !: !@").is_empty());
+    }
+}

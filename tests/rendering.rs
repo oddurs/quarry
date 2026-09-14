@@ -111,6 +111,25 @@ fn a_non_http_service_still_shows_what_it_cost() {
     );
 }
 
+/// Grouped by kind: every database together, whatever project it came from.
+#[test]
+fn grouped_by_kind() {
+    let mut app = loaded();
+    app.group_by = quarry::model::GroupBy::Kind;
+    app.rebuild();
+    assert_snapshot("by_kind", &ui::render_to_string(&mut app, 118, 16, 0));
+}
+
+/// One flat list, newest first — no headings at all, and the pane says so.
+#[test]
+fn flat_and_newest_first() {
+    let mut app = loaded();
+    app.group_by = quarry::model::GroupBy::Nothing;
+    app.sort_by = quarry::model::SortBy::Newest;
+    app.rebuild();
+    assert_snapshot("flat", &ui::render_to_string(&mut app, 118, 14, 0));
+}
+
 #[test]
 fn standard_screen() {
     let mut app = loaded();
