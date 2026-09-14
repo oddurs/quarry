@@ -76,20 +76,42 @@ fn draw_titlebar(f: &mut Frame, app: &App, t: &Theme, area: Rect, tick: usize) {
     let mut left = vec![
         Span::styled(" quarry", Style::default().fg(t.accent).bold()),
         Span::styled("  ", Style::default()),
-        Span::styled(format!("{services}"), Style::default().fg(t.text).bold()),
-        Span::styled(" listening", Style::default().fg(t.muted)),
     ];
+    // Scoped, the repository is the headline: it is the answer to "which
+    // project am I looking at", and without it the screen is indistinguishable
+    // from a machine that happens to be quiet.
+    if let Some(scope) = app.scoped() {
+        left.push(Span::styled(
+            scope.name.clone(),
+            Style::default().fg(t.text).bold(),
+        ));
+        if roomy && let Some(remote) = &scope.remote {
+            left.push(Span::styled(
+                format!(" {remote}"),
+                Style::default().fg(t.faint),
+            ));
+        }
+        left.push(Span::styled("  ", Style::default()));
+    }
+    left.push(Span::styled(
+        format!("{services}"),
+        Style::default().fg(t.text).bold(),
+    ));
+    left.push(Span::styled(" listening", Style::default().fg(t.muted)));
     if roomy {
         left.push(Span::styled(" · ", Style::default().fg(t.faint)));
         left.push(Span::styled(
             format!("{projects}"),
             Style::default().fg(t.text).bold(),
         ));
+        // Inside one repository the groups are its worktrees, so calling them
+        // projects would be a different claim than the screen is making.
         left.push(Span::styled(
-            if projects == 1 {
-                " project"
-            } else {
-                " projects"
+            match (app.scoped().is_some(), projects == 1) {
+                (true, true) => " worktree",
+                (true, false) => " worktrees",
+                (false, true) => " project",
+                (false, false) => " projects",
             },
             Style::default().fg(t.muted),
         ));
@@ -702,7 +724,11 @@ fn group_detail(app: &App, group: &crate::app::Group, t: &Theme) -> Vec<Line<'st
         Line::from(""),
     ];
 
-    if group.branch.is_some() || group.remote.is_some() {
+    // The path earns the section on its own. Narrowed to one repository the
+    // group heading is already the branch, so the branch and remote are not
+    // repeated here — and where you would `cd` to is the thing left to say.
+    let root = members.first().and_then(|s| s.repo.as_ref());
+    if group.branch.is_some() || group.remote.is_some() || root.is_some() {
         lines.push(section("Repository", t));
         if let Some(branch) = &group.branch {
             lines.push(kv("branch", branch, t));
@@ -710,7 +736,7 @@ fn group_detail(app: &App, group: &crate::app::Group, t: &Theme) -> Vec<Line<'st
         if let Some(remote) = &group.remote {
             lines.push(kv("remote", remote, t));
         }
-        if let Some(root) = members.first().and_then(|s| s.repo.as_ref()) {
+        if let Some(root) = root {
             lines.push(kv("path", &tilde(&root.root.display().to_string()), t));
         }
         lines.push(Line::from(""));

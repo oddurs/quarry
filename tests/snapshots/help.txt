@@ -10,6 +10,7 @@
 │  ●  5432 postg│  /             filter by project, port, process or kind          │               │
 │  ✕  6379 redis│  esc           back out — clear the filter, close an overlay     │               │
 │               │  a             show system services too                          │               │
+│               │  .             narrow to the repository you are in               │               │
 │               │  r             rescan now                                        │               │
 │               │  ctrl-r        reload the config and theme                       │               │
 │               │  K             stop the process — SIGTERM, with a confirm        │               │
@@ -21,6 +22,5 @@
 │               │  click         select a row, or open the URL                     │               │
 │               │                                                                  │               │
 │               ╰──────────────────────────────────────────────────────────────────╯               │
-│                                                  ││   user    dev                                │
 ╰──────────────────────────────────────────────────╯╰──────────────────────────────────────────────╯
- ↑↓ move  ↵ open  y copy  / filter  a all  K stop  r refresh  ? help
+ ↑↓ move  ↵ open  y copy  / filter  a all  . here  K stop  r refresh  ? help

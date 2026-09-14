@@ -1,20 +1,26 @@
- quarry  1 listening · 0 projects · 1 unhealthy · filter “redis”                                     updated just now
+ quarry  acme-web acme/acme-web  3 listening · 2 worktrees                                           updated just now
 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 ╭ Services ─────────────────────────────────────────────────╮╭ Detail ───────────────────────────────────────────────╮
-│ ▾ no project                                         ✕1  1││ ✕ redis-server                                        │
-│▌ ✕  6379 redis-server                   cache  no answer  ││   redis-server · cache · pid 16379                    │
-│                                                           ││                                                       │
-│                                                           ││ ADDRESS                                               │
-│                                                           ││   http://localhost:6379  (copied, not opened)         │
+│ ▾ feat/billing                                           2││ ● acme-web                                            │
+│▌ ●  3001 next-server                      web  200   14ms ││   next-server · web · pid 13001                       │
+│  ○  5432 PostgreSQL                        db  ···        ││                                                       │
+│ ▾ main                                                   1││ ADDRESS                                               │
+│  ●  3000 next-server                      web  200  9.0ms ││   http://localhost:3001  ↗                            │
 │                                                           ││                                                       │
 │                                                           ││ HEALTH                                                │
-│                                                           ││   ✕ not responding                                    │
+│                                                           ││   ● 200 OK · 14ms                                     │
+│                                                           ││   server  Next.js                                     │
 │                                                           ││                                                       │
 │                                                           ││ LISTENING                                             │
-│                                                           ││   6379  127.0.0.1  loopback                           │
+│                                                           ││   3001  127.0.0.1  loopback                           │
+│                                                           ││                                                       │
+│                                                           ││ REPOSITORY                                            │
+│                                                           ││   acme-web                                            │
+│                                                           ││   path    /src/.worktrees/acme-web/feat/billing       │
+│                                                           ││   branch  feat/billing                                │
+│                                                           ││   remote  acme/acme-web                               │
 │                                                           ││                                                       │
 │                                                           ││ PROCESS                                               │
 │                                                           ││   user    dev                                         │
-│                                                           ││   uptime  2h 0m                                       │
 ╰───────────────────────────────────────────────────────────╯╰───────────────────────────────────────────────────────╯
  ↑↓ move  ↵ open  y copy  / filter  a all  . here  K stop  r refresh  ? help

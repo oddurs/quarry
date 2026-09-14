@@ -21,4 +21,4 @@
 │                                                           ││   remote  acme/acme-api                               │
 │                                                           ││                                                       │
 ╰───────────────────────────────────────────────────────────╯╰───────────────────────────────────────────────────────╯
- ↑↓ move  ↵ open  y copy  / filter  a all  K stop  r refresh  ? help
+ ↑↓ move  ↵ open  y copy  / filter  a all  . here  K stop  r refresh  ? help

@@ -17,4 +17,4 @@
 │                               ││                             │
 │                               ││ REPOSITORY                  │
 ╰───────────────────────────────╯╰─────────────────────────────╯
- ↑↓ move  ↵ open  y copy  / filter  a all  K stop  r refresh
+ ↑↓ move  ↵ open  y copy  / filter  a all  . here  K stop

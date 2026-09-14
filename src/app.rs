@@ -8,7 +8,7 @@ use ratatui::layout::Rect;
 
 use crate::diag;
 use crate::keys::{Command, Keymap};
-use crate::model::{GroupSource, Health, Rules, Server};
+use crate::model::{GroupSource, Health, Rules, Scope, Server};
 use crate::signature::{Evidence, Registry};
 use crate::theme::Theme;
 
@@ -94,6 +94,12 @@ pub struct App {
     pub search: String,
     pub searching: bool,
     pub show_all: bool,
+    /// The repository quarry was started in, if it was started in one. Found
+    /// once: the working directory cannot change while it runs.
+    pub scope: Option<Scope>,
+    /// Whether that scope is being applied. Separate from `scope` so the key
+    /// that turns it off can turn it back on without another look at the disk.
+    pub here: bool,
     pub help: bool,
     pub mouse: bool,
     pub scanning: bool,
@@ -150,6 +156,8 @@ impl App {
             search: String::new(),
             searching: false,
             show_all: false,
+            scope: None,
+            here: false,
             help: false,
             mouse: true,
             scanning: true,
@@ -347,6 +355,14 @@ impl App {
     }
 
     fn visible(&self, s: &Server, needle: &str) -> bool {
+        // Narrowing to a project is one more filter, not a different mode.
+        // `-a` has to keep meaning what it means everywhere else, or a repo
+        // with a couple of unix sockets in it looks like it has servers.
+        if let Some(scope) = self.scoped()
+            && !s.in_scope(scope)
+        {
+            return false;
+        }
         if !self.show_all && s.kind.is_background_noise() {
             return false;
         }
@@ -366,7 +382,21 @@ impl App {
         // Group keys are derived from the repo, the directory and the kind, and
         // each derivation allocates. Computing them once and sorting on the
         // result turns O(n log n) allocations into O(n).
-        let keys: Vec<String> = self.servers.iter().map(|s| s.group_key()).collect();
+        // Inside one repository every service shares a project, so grouping
+        // by project would produce a single heap. The branch is what tells two
+        // of them apart, and it is what a person calls a worktree.
+        let scoped = self.scoped().is_some();
+        let keys: Vec<String> = self
+            .servers
+            .iter()
+            .map(|s| {
+                if scoped {
+                    s.worktree_key()
+                } else {
+                    s.group_key()
+                }
+            })
+            .collect();
         let ranks: Vec<u8> = self
             .servers
             .iter()
@@ -408,8 +438,17 @@ impl App {
                 self.groups.push(Group {
                     key: keys[i].clone(),
                     source: self.servers[i].group_source(),
-                    branch: repo.as_ref().and_then(|r| r.branch.clone()),
-                    remote: repo.as_ref().and_then(|r| r.remote.clone()),
+                    // Scoped, the key is already the branch and the remote is
+                    // the same for every group. Printing either again would be
+                    // noise on every row.
+                    branch: repo
+                        .as_ref()
+                        .and_then(|r| r.branch.clone())
+                        .filter(|_| !scoped),
+                    remote: repo
+                        .as_ref()
+                        .and_then(|r| r.remote.clone())
+                        .filter(|_| !scoped),
                     count: 0,
                     trouble: 0,
                 });
@@ -594,6 +633,34 @@ impl App {
         }
     }
 
+    /// The scope, if one was found *and* is being applied.
+    pub fn scoped(&self) -> Option<&Scope> {
+        self.here.then_some(self.scope.as_ref()).flatten()
+    }
+
+    /// Turn the repository scope on or off. Asking to narrow to a project
+    /// while standing outside one has to fail visibly, or the screen simply
+    /// does not change and nothing explains why.
+    pub fn toggle_here(&mut self) {
+        match &self.scope {
+            None => self.toast(
+                "not in a git repository — nothing to narrow to".to_string(),
+                ToastKind::Bad,
+            ),
+            Some(scope) => {
+                let label = scope.label();
+                self.here = !self.here;
+                let text = if self.here {
+                    format!("showing {label} only")
+                } else {
+                    "showing every project".to_string()
+                };
+                self.toast(text, ToastKind::Info);
+                self.rebuild();
+            }
+        }
+    }
+
     pub fn ask_kill(&mut self, force: bool) {
         let Some(s) = self.selected_server() else {
             return;
@@ -708,6 +775,7 @@ impl App {
                 return Action::Refresh;
             }
             Command::Reload => return Action::Reload,
+            Command::ToggleHere => self.toggle_here(),
             Command::Stop => self.ask_kill(false),
             Command::ForceKill => self.ask_kill(true),
             Command::Diagnostics => self.diagnostics = true,

@@ -24,8 +24,39 @@ uses that — a repo name is shown in magenta, a plain folder in teal.
 │  ●  4320 node serve      web  404  2ms ││   http://localhost:4470  ↗                   │
 │  ●  4330 node astro.mjs  web  500  3ms ││ ...                                          │
 ╰────────────────────────────────────────╯╰──────────────────────────────────────────────╯
- ↑↓ move  ↵ open  y copy  / filter  a all  K stop  r refresh  ? help
+ ↑↓ move  ↵ open  y copy  / filter  a all  . here  K stop  r refresh  ? help
 ```
+
+## One project at a time
+
+`quarry --here` answers a narrower question than "what is running on this
+machine": what is running for the project I am in. Press `.` to switch between
+the two without restarting.
+
+```
+ quarry  acme-web acme/acme-web  3 listening · 2 worktrees                    updated just now
+──────────────────────────────────────────────────────────────────────────────────────────────
+╭ Services ─────────────────────────────────────────────────╮╭ Detail ─────────────────────────
+│ ▾ feat/billing                                           2││ ● acme-web
+│▌ ●  3001 next-server                      web  200   14ms ││   next-server · web · pid 13001
+│  ○  5432 PostgreSQL                        db  ···        ││
+│ ▾ main                                                   1││ ADDRESS
+│  ●  3000 next-server                      web  200  9.0ms ││   http://localhost:3001  ↗
+```
+
+The groups are worktrees, not projects — inside one repository the project name
+is on every row and tells you nothing, while the branch is what distinguishes
+two copies of the same server on two ports. A linked worktree counts even
+though it lives somewhere else on disk, and a Compose stack counts even though
+it runs in a container: both are attributed to the repository, so both are part
+of the project.
+
+Two unrelated checkouts can be called `site`. quarry compares repository roots
+rather than names, so they do not become one project.
+
+`-p --here` prints the same thing one line per service, with the branch in
+place of the project. `--here` outside a repository is an error rather than a
+quiet fall back to the whole machine.
 
 ## What it knows
 
@@ -150,6 +181,7 @@ quarry --fix-terminal         # undo a terminal left in mouse-reporting mode
 | `y` | copy the URL to the clipboard |
 | `/` | filter by repo, port, process or kind |
 | `a` | include system services |
+| `.` | narrow to the repository you are in |
 | `esc` | back out — clear the filter, close an overlay |
 | `r` | rescan now |
 | `K` / `X` | SIGTERM / SIGKILL the process, with a confirm |
