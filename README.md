@@ -24,7 +24,7 @@ uses that — a repo name is shown in magenta, a plain folder in teal.
 │  ●  4320 node serve      web  404  2ms ││   http://localhost:4470  ↗                   │
 │  ●  4330 node astro.mjs  web  500  3ms ││ ...                                          │
 ╰────────────────────────────────────────╯╰──────────────────────────────────────────────╯
- ↑↓ move  ↵ open  y copy  / filter  a all  K stop  r refresh  ? help
+ ↑↓ move  ↵ open  y copy  / filter  a all  K stop  R restart  r refresh  ? help
 ```
 
 ## What it knows
@@ -152,12 +152,35 @@ quarry --fix-terminal         # undo a terminal left in mouse-reporting mode
 | `a` | include system services |
 | `esc` | back out — clear the filter, close an overlay |
 | `r` | rescan now |
-| `K` / `X` | SIGTERM / SIGKILL the process, with a confirm |
+| `K` / `R` | stop or restart it, with a confirm |
+| `X` | force kill — SIGKILL, with a confirm |
 | `d` | diagnostics — what failed, and why |
 | `ctrl-r` | reload the config and theme |
 | `m` | toggle mouse capture — off restores native text selection |
 | `?` | help |
 | `q` | quit |
+
+### Stopping and restarting
+
+`K` stops a service, `R` restarts it, `X` kills it outright. Each one asks
+first, and the prompt says what it is actually about to do, because that
+differs by what owns the service:
+
+- **A container** is stopped and restarted through the daemon it was found on
+  — by API, on that socket, not through whichever daemon `docker` on `PATH`
+  points at. A published port is held by the runtime's forwarder rather than
+  by the container, so signalling the pid quarry can see would leave the
+  container running with a broken port, and on some runtimes that pid belongs
+  to the daemon itself.
+- **A process** gets SIGTERM. To restart one, quarry reads its arguments,
+  its working directory and its environment first — if it cannot read all
+  three it says so and stops, rather than shutting down something it cannot
+  start again. Once the process has exited it watches the port for a couple of
+  seconds: most dev servers are already supervised by `npm run dev` or
+  `nodemon`, and if something else brings the service back, quarry leaves it
+  alone instead of starting a second copy. Otherwise it runs the command
+  again, detached, with its output appended to
+  `~/.local/state/quarry/<command>.log`.
 
 ## How it works
 

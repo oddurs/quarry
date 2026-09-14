@@ -8,6 +8,7 @@ use ratatui::layout::Rect;
 
 use crate::diag;
 use crate::keys::{Command, Keymap};
+use crate::lifecycle::{Op, Target};
 use crate::model::{GroupSource, Health, Rules, Server};
 use crate::signature::{Evidence, Registry};
 use crate::theme::Theme;
@@ -34,10 +35,12 @@ pub enum Action {
     Open(String),
     /// Put text on the system clipboard.
     Copy(String),
-    /// Signal a process. Only ever produced after an explicit confirmation.
-    Signal {
-        pid: u32,
-        force: bool,
+    /// Stop, restart or kill a service. Only ever produced after an explicit
+    /// confirmation, and always carried out on a worker: a stop waits on a
+    /// grace period, and the UI must not wait with it.
+    Lifecycle {
+        target: Target,
+        op: Op,
     },
 }
 
@@ -71,9 +74,9 @@ pub struct Confirm {
     pub action: PendingAction,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub enum PendingAction {
-    Kill { pid: u32, force: bool },
+    Lifecycle { target: Target, op: Op },
 }
 
 pub struct App {
@@ -594,19 +597,58 @@ impl App {
         }
     }
 
-    pub fn ask_kill(&mut self, force: bool) {
+    /// Raise the confirmation for stopping, restarting or killing what is
+    /// selected.
+    ///
+    /// The prompt names what will actually happen rather than what was pressed.
+    /// "Restart" means two different things depending on whether a daemon or
+    /// the kernel owns the service, and a confirmation that hides the
+    /// difference is not a confirmation.
+    pub fn ask(&mut self, op: Op) {
         let Some(s) = self.selected_server() else {
             return;
         };
+        let target = s.lifecycle();
+        let prompt = format!(
+            "{} {}?",
+            match op {
+                Op::Stop => "Stop",
+                Op::Restart => "Restart",
+                Op::Kill => "Force kill",
+            },
+            s.title()
+        );
+        // ":8000" rather than the bare "8000" the list column shows — in a
+        // sentence the colon is what makes it read as a port.
+        let at = match s.primary() {
+            Some(l) if l.is_unix() => l.label(),
+            Some(l) => format!(":{}", l.port),
+            None => "no listener".to_string(),
+        };
+        let detail = match (&target, op) {
+            (Target::Container(c), Op::Stop) => {
+                format!("the runtime stops {} · {at}", c.display_name())
+            }
+            (Target::Container(c), Op::Restart) => {
+                format!("the runtime restarts {} · {at}", c.display_name())
+            }
+            (Target::Container(c), Op::Kill) => {
+                format!("the runtime kills {} · no grace period", c.display_name())
+            }
+            (Target::Process { pid, .. }, Op::Stop) => {
+                format!("SIGTERM {pid} · {} on {at}", s.command)
+            }
+            (Target::Process { pid, .. }, Op::Restart) => {
+                format!("SIGTERM {pid}, then start it again · {at}")
+            }
+            (Target::Process { pid, .. }, Op::Kill) => {
+                format!("SIGKILL {pid}, no clean shutdown · {at}")
+            }
+        };
         self.confirm = Some(Confirm {
-            prompt: format!(
-                "{} {} (pid {})?",
-                if force { "Force kill" } else { "Stop" },
-                s.title(),
-                s.pid
-            ),
-            detail: format!("{} on :{}", s.command, s.primary_port()),
-            action: PendingAction::Kill { pid: s.pid, force },
+            prompt,
+            detail,
+            action: PendingAction::Lifecycle { target, op },
         });
     }
 
@@ -618,7 +660,7 @@ impl App {
             return Action::None;
         }
         match c.action {
-            PendingAction::Kill { pid, force } => Action::Signal { pid, force },
+            PendingAction::Lifecycle { target, op } => Action::Lifecycle { target, op },
         }
     }
 
@@ -708,8 +750,9 @@ impl App {
                 return Action::Refresh;
             }
             Command::Reload => return Action::Reload,
-            Command::Stop => self.ask_kill(false),
-            Command::ForceKill => self.ask_kill(true),
+            Command::Stop => self.ask(Op::Stop),
+            Command::Restart => self.ask(Op::Restart),
+            Command::ForceKill => self.ask(Op::Kill),
             Command::Diagnostics => self.diagnostics = true,
             Command::Help => self.help = true,
             Command::ToggleMouse => {

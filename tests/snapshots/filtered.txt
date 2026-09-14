@@ -17,4 +17,4 @@
 │                                                           ││   user    dev                                         │
 │                                                           ││   uptime  2h 0m                                       │
 ╰───────────────────────────────────────────────────────────╯╰───────────────────────────────────────────────────────╯
- ↑↓ move  ↵ open  y copy  / filter  a all  K stop  r refresh  ? help
+ ↑↓ move  ↵ open  y copy  / filter  a all  K stop  R restart  r refresh  ? help

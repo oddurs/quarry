@@ -267,6 +267,8 @@ pub fn demo() -> Vec<Server> {
             .health(health)
             .build();
         s.container = Some(crate::docker::Container {
+            id: format!("{:0>64}", format!("{name}1d")),
+            socket: "/var/run/docker.sock".into(),
             name: format!("harbour-{name}-1"),
             image: if name == "db" {
                 "postgres:16".into()

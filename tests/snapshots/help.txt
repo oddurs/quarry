@@ -12,7 +12,8 @@
 │               │  a             show system services too                          │               │
 │               │  r             rescan now                                        │               │
 │               │  ctrl-r        reload the config and theme                       │               │
-│               │  K             stop the process — SIGTERM, with a confirm        │               │
+│               │  K             stop it — SIGTERM, or the container's daemon      │               │
+│               │  R             restart it — stop, then start it again            │               │
 │               │  X             force kill — SIGKILL, with a confirm              │               │
 │               │  d             diagnostics — what failed, and why                │               │
 │               │  m             mouse capture — off restores text selection       │               │
@@ -21,6 +22,5 @@
 │               │  click         select a row, or open the URL                     │               │
 │               │                                                                  │               │
 │               ╰──────────────────────────────────────────────────────────────────╯               │
-│                                                  ││   user    dev                                │
 ╰──────────────────────────────────────────────────╯╰──────────────────────────────────────────────╯
- ↑↓ move  ↵ open  y copy  / filter  a all  K stop  r refresh  ? help
+ ↑↓ move  ↵ open  y copy  / filter  a all  K stop  R restart  r refresh  ? help

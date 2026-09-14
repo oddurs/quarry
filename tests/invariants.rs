@@ -203,7 +203,7 @@ fn overlays_render_at_every_size() {
     for (name, prepare) in [
         ("help", (|a: &mut App| a.help = true) as fn(&mut App)),
         ("diagnostics", |a: &mut App| a.diagnostics = true),
-        ("confirm", |a: &mut App| a.ask_kill(true)),
+        ("confirm", |a: &mut App| a.ask(quarry::lifecycle::Op::Kill)),
         ("search", |a: &mut App| {
             a.searching = true;
             a.search = "a very long search string indeed".into();
@@ -302,7 +302,7 @@ fn no_key_performs_a_side_effect_on_its_own() {
             let action = app.handle_key(key, mods);
             // Effects are values here, not calls. Opening and copying are
             // allowed to be *requested*; signalling must go through a confirm.
-            if let Action::Signal { .. } = action {
+            if let Action::Lifecycle { .. } = action {
                 panic!("{key:?} with {mods:?} asked to signal a process with no confirmation");
             }
             app.check_invariants()
@@ -330,8 +330,10 @@ fn signalling_requires_an_explicit_confirmation() {
 
     app.handle_key(KeyCode::Char('K'), KeyModifiers::NONE);
     match app.handle_key(KeyCode::Char('y'), KeyModifiers::NONE) {
-        Action::Signal { force, .. } => assert!(!force, "K is SIGTERM, not SIGKILL"),
-        other => panic!("expected a signal action, got {other:?}"),
+        Action::Lifecycle { op, .. } => {
+            assert_eq!(op, quarry::lifecycle::Op::Stop, "K is SIGTERM, not SIGKILL")
+        }
+        other => panic!("expected a lifecycle action, got {other:?}"),
     }
 }
 
@@ -412,7 +414,7 @@ fn no_binding_can_reach_a_signal_without_a_confirmation() {
             };
             let action = app.handle_key(code, mods);
             assert!(
-                !matches!(action, Action::Signal { .. }),
+                !matches!(action, Action::Lifecycle { .. }),
                 "{spec:?} signalled a process with no confirmation"
             );
             // Clear any confirmation the key raised, so the next key is judged
@@ -455,5 +457,66 @@ fn quit_is_always_reachable() {
             "bindings {bindings:?} left quit bound to {:?} which did nothing",
             quit_keys[0]
         );
+    }
+}
+
+/// Nothing that a container runtime owns may be signalled by pid.
+///
+/// A published port belongs to the runtime's forwarder — `docker-proxy`, or
+/// OrbStack's helper — and not to the container. Sending SIGTERM there leaves
+/// the container running with its port broken, and on some runtimes the pid
+/// quarry can see is part of the daemon, which takes every other container
+/// down with it.
+#[test]
+fn a_container_is_never_stopped_by_signalling_a_pid() {
+    use quarry::lifecycle::{Op, Target};
+
+    let servers = testkit::demo();
+    let containers = servers.iter().filter(|s| s.container.is_some()).count();
+    assert!(containers > 0, "the fixture has no containers to check");
+
+    for s in &servers {
+        match (s.container.as_ref(), s.lifecycle()) {
+            (Some(c), Target::Container(t)) => assert_eq!(&*t, c),
+            (Some(c), Target::Process { pid, .. }) => panic!(
+                "{} is container {} but would be stopped by signalling pid {pid}",
+                s.title(),
+                c.display_name()
+            ),
+            (None, Target::Process { pid, .. }) => assert_eq!(pid, s.pid),
+            (None, Target::Container(_)) => panic!("{} has no container", s.title()),
+        }
+    }
+
+    // And the confirmation has to say which of the two is about to happen,
+    // because "restart" means something different in each case.
+    let mut app = App::new();
+    app.ingest(testkit::demo());
+    for op in [Op::Stop, Op::Restart, Op::Kill] {
+        for row in 0..app.rows.len() {
+            app.selected = row;
+            app.confirm = None;
+            app.ask(op);
+            let Some(confirm) = &app.confirm else {
+                continue;
+            };
+            let Some(s) = app.selected_server() else {
+                continue;
+            };
+            let container = s.container.is_some();
+            let detail = confirm.detail.clone();
+            assert_eq!(
+                container,
+                detail.contains("the runtime"),
+                "a {} prompt has to name what it will do: {detail:?}",
+                op.verb()
+            );
+            assert_ne!(
+                container,
+                detail.contains("SIG"),
+                "a {} prompt has to name what it will do: {detail:?}",
+                op.verb()
+            );
+        }
     }
 }
