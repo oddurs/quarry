@@ -128,6 +128,20 @@ impl ServerBuilder {
         self
     }
 
+    /// Listening on a unix socket instead of a port. The path is deliberately
+    /// long here: an arbitrarily long one is the case the list column has to
+    /// survive, and `/tmp/cc-socks/…` is the shape a real one takes.
+    pub fn unix(mut self, path: &str) -> Self {
+        self.server.listeners = vec![crate::model::Listener::unix(PathBuf::from(path))];
+        self
+    }
+
+    /// Further listeners beyond the first, which the row reports as `+n`.
+    pub fn also_on(mut self, port: u16) -> Self {
+        self.server.listeners.push(listener(port));
+        self
+    }
+
     pub fn kind(mut self, kind: Kind) -> Self {
         self.server.kind = kind;
         self

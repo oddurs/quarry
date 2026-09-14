@@ -228,6 +228,23 @@ impl Listener {
         }
     }
 
+    /// What goes in a list column, where the width belongs to the table rather
+    /// than to this value.
+    ///
+    /// Always the socket's own name, never the path to it. `label` keeps the
+    /// directory while it fits, which is right in a detail pane and wrong in a
+    /// column: `/tmp/cc-socks/52425.sock` is twenty-four characters of which
+    /// five distinguish it from the next one.
+    pub fn column(&self) -> String {
+        match &self.path {
+            Some(path) => path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| path.to_string_lossy().to_string()),
+            None => self.port.to_string(),
+        }
+    }
+
     pub fn scope(&self) -> &'static str {
         match self.transport {
             Transport::Unix => "filesystem",
@@ -679,6 +696,11 @@ impl Server {
     /// What to show where a port would go.
     pub fn primary_label(&self) -> String {
         self.primary().map(|l| l.label()).unwrap_or_default()
+    }
+
+    /// The same, for a column of fixed width.
+    pub fn primary_column(&self) -> String {
+        self.primary().map(|l| l.column()).unwrap_or_default()
     }
 
     /// True when nothing here can be reached over a port.

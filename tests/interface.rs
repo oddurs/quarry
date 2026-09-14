@@ -491,3 +491,137 @@ mod excluding {
         assert!(Query::parse("! !: !@").is_empty());
     }
 }
+
+/// The list is a table. Every defect here was one column deciding its own
+/// width and pushing the rest of the row off its line.
+mod columns {
+    use super::*;
+
+    fn crowded() -> Vec<Server> {
+        vec![
+            server(8384, "syncthing")
+                .service("Syncthing")
+                .kind(Kind::Storage)
+                .health(testkit::served(200, 1, None, None))
+                .build(),
+            server(5353, "Google Chrome")
+                .service("Chrome DevTools Protocol")
+                .kind(Kind::Debug)
+                .build(),
+            server(49967, "firefox").service("firefox").build(),
+            // A socket whose name is longer than the whole row.
+            server(1, "fresh")
+                .unix("/tmp/fresh-501/local-27472-81dd8dbc70.ctrl.sock")
+                .service("fresh")
+                .build(),
+            // And one with more listeners than it shows.
+            server(8899, "python3")
+                .service("Python http.server")
+                .kind(Kind::Web)
+                .also_on(8900)
+                .health(testkit::served(200, 2, None, None))
+                .build(),
+        ]
+    }
+
+    fn rows_at(width: u16) -> Vec<String> {
+        let mut app = App::new();
+        app.group_by = quarry::model::GroupBy::Nothing;
+        // A unix socket is background unless asked for, and it is the row the
+        // column has to survive.
+        app.show_all = true;
+        app.ingest(crowded());
+        let rendered = quarry::ui::render_to_string(&mut app, width, 12, 0);
+        let rows: Vec<String> = rendered
+            .lines()
+            .filter(|l| l.chars().any(|c| "●○✕▲".contains(c)))
+            .map(str::to_string)
+            .collect();
+        assert_eq!(
+            rows.len(),
+            crowded().len(),
+            "at {width} columns some rows did not render:\n{rendered}"
+        );
+        rows
+    }
+
+    /// `Sync…storage`. A name truncated to exactly its column ran straight
+    /// into the badge, so the two read as one word.
+    #[test]
+    fn a_truncated_name_never_touches_what_follows_it() {
+        for width in 30..=140u16 {
+            for row in rows_at(width) {
+                let chars: Vec<char> = row.chars().collect();
+                for (i, c) in chars.iter().enumerate() {
+                    if *c == '…' {
+                        let next = chars.get(i + 1).copied().unwrap_or(' ');
+                        assert!(
+                            next.is_whitespace() || next == '│',
+                            "at {width} columns the truncation runs into the next \
+                             column: {row:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// A unix socket's name is as long as someone felt like making it. Sizing
+    /// the first column from it pushed the name, the kind and the status off
+    /// their lines for every other row on screen.
+    #[test]
+    fn one_long_socket_does_not_move_every_other_row() {
+        for width in 60..=140u16 {
+            let rows = rows_at(width);
+            // Where the name begins: past the gutter, the arrival column and
+            // the health dot, over the first column's right-alignment padding,
+            // over the value itself, and over the one space after it.
+            let starts: Vec<usize> = rows
+                .iter()
+                .map(|r| {
+                    let c: Vec<char> = r.chars().collect();
+                    let mut i = 4;
+                    while i < c.len() && c[i].is_whitespace() {
+                        i += 1;
+                    }
+                    while i < c.len() && !c[i].is_whitespace() {
+                        i += 1;
+                    }
+                    i + 1
+                })
+                .collect();
+            assert!(
+                starts.windows(2).all(|w| w[0] == w[1]),
+                "at {width} columns the rows do not line up: {rows:#?}"
+            );
+        }
+    }
+
+    /// The name is the row; the kind is an attribute of it that the colour
+    /// already half carries. When only one fits, the name wins.
+    #[test]
+    fn the_name_outlives_the_badge() {
+        let narrow = rows_at(74);
+        let syncthing = narrow
+            .iter()
+            .find(|r| r.contains("Sync"))
+            .expect("the syncthing row");
+        assert!(
+            syncthing.contains("Syncthing"),
+            "the name was cut to keep a badge: {syncthing:?}"
+        );
+    }
+
+    #[test]
+    fn no_row_is_wider_than_the_terminal() {
+        for width in 30..=140u16 {
+            for row in rows_at(width) {
+                assert_eq!(
+                    row.chars().count(),
+                    width as usize,
+                    "at {width} columns: {row:?}"
+                );
+            }
+        }
+    }
+}

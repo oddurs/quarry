@@ -271,6 +271,25 @@ fn draw_list(f: &mut Frame, app: &mut App, t: &Theme, area: Rect) {
     let end = (app.offset + inner_height).min(app.rows.len());
     let window = &app.rows[app.offset.min(end)..end];
 
+    // Sized from every visible row rather than from the window, so the column
+    // does not change width as you scroll past a long socket name.
+    let label_width = app
+        .rows
+        .iter()
+        .filter_map(|r| match r {
+            Row::Server(i) => Some(app.servers[*i].primary_column().chars().count()),
+            Row::Group(_) => None,
+        })
+        .max()
+        .unwrap_or(PORT_WIDTH)
+        // A third of the row, but never less than a port: on a pane four
+        // columns wide the cap would otherwise fall below the floor, and
+        // `clamp` is entitled to panic when it does.
+        .clamp(
+            PORT_WIDTH,
+            LABEL_MAX.min(inner_width.min(ROW_MAX) / 3).max(PORT_WIDTH),
+        );
+
     let cursor = app.selected.saturating_sub(app.offset);
     let items: Vec<ListItem> = window
         .iter()
@@ -282,7 +301,9 @@ fn draw_list(f: &mut Frame, app: &mut App, t: &Theme, area: Rect) {
             let row_width = inner_width.min(ROW_MAX);
             let line = match row {
                 Row::Group(g) => group_line(app, t, *g, row_width, selected),
-                Row::Server(s) => server_line(&app.servers[*s], t, row_width, selected),
+                Row::Server(s) => {
+                    server_line(&app.servers[*s], t, row_width, label_width, selected)
+                }
             };
             // Never both: two highlights on one line is one too many, and the
             // cursor is the one that has to win.
@@ -369,6 +390,14 @@ fn gutter(selected: bool, t: &Theme) -> Span<'static> {
 /// instead.
 const ROW_MAX: usize = 72;
 
+/// Five digits, which is every port there is.
+const PORT_WIDTH: usize = 5;
+
+/// The widest the leftmost column may get when a unix socket is on screen.
+/// Enough of `local-27472-81dd8dbc70.ctrl.sock` to tell it from its neighbour,
+/// and not so much that it is the only thing on the line.
+const LABEL_MAX: usize = 18;
+
 fn group_line(app: &App, t: &Theme, idx: usize, width: usize, selected: bool) -> Line<'static> {
     let g = &app.groups[idx];
     let collapsed = app.collapsed.contains(&g.key);
@@ -452,7 +481,13 @@ fn is_fresh(s: &Server) -> bool {
     s.appeared.is_some_and(|at| at.elapsed() < FRESH)
 }
 
-fn server_line(s: &Server, t: &Theme, width: usize, selected: bool) -> Line<'static> {
+fn server_line(
+    s: &Server,
+    t: &Theme,
+    width: usize,
+    label_width: usize,
+    selected: bool,
+) -> Line<'static> {
     let (dot, dot_color) = (s.health.glyph(), t.health(&s.health));
     // The column between the selection bar and the health dot was already a
     // blank space, so marking an arrival costs no width and shifts nothing.
@@ -461,7 +496,14 @@ fn server_line(s: &Server, t: &Theme, width: usize, selected: bool) -> Line<'sta
     } else {
         Span::raw(" ")
     };
-    let port = format!("{:>5}", s.primary_label());
+    // Right-aligned in a width the table chose, not one this value chose. A
+    // port is five digits; a unix socket's name is as long as someone felt
+    // like making it, and letting it size the column pushed the name, the kind
+    // and the status off their lines for every other row on screen.
+    let port = format!(
+        "{:>label_width$}",
+        truncate(&s.primary_column(), label_width)
+    );
     let extra_ports = if s.listeners.len() > 1 {
         format!(" +{}", s.listeners.len() - 1)
     } else {
@@ -471,13 +513,21 @@ fn server_line(s: &Server, t: &Theme, width: usize, selected: bool) -> Line<'sta
     let (status_full, status_color) = status_cell(&s.health, t);
     let status_short = status_abbrev(&s.health);
 
-    // "  " + dot + " " + port + extras, then one trailing space at the end.
-    let lead = 2 + 1 + 1 + port.chars().count() + extra_ports.chars().count() + 1;
+    // "  " + dot + " " + port, then one trailing space at the end. The count
+    // of further listeners is deliberately not here: it appears on one row in
+    // twenty, and in the lead it moved that row's name column out of line with
+    // every other row on screen. It is spent out of the name's budget instead.
+    let lead = 2 + 1 + 1 + port.chars().count() + 1;
     let avail = width.saturating_sub(lead + 1);
 
-    // Degrade in a defined order — badge first, then the latency, then the
-    // name — so a narrow terminal loses detail instead of losing its shape.
-    const MIN_NAME: usize = 4;
+    // The name is the row. Everything else is an attribute of it, so
+    // everything else goes first: the kind — which the colour and often the
+    // name already imply — then the latency. `Sync…storage` is not a row worth
+    // keeping a badge for.
+    const MIN_NAME: usize = 14;
+    // One space of it is the gap before whatever follows, so a name that fills
+    // its column does not run into the badge.
+    const GAP: usize = 1;
     let badge_cost = badge.chars().count() + 2;
     let (show_badge, status) = if avail >= badge_cost + status_full.chars().count() + MIN_NAME {
         (true, status_full.clone())
@@ -489,8 +539,15 @@ fn server_line(s: &Server, t: &Theme, width: usize, selected: bool) -> Line<'sta
 
     let reserved = status.chars().count() + if show_badge { badge_cost } else { 0 };
     let name_width = avail.saturating_sub(reserved);
-    let name = truncate(&s.service_name(), name_width);
-    let pad = name_width.saturating_sub(name.chars().count());
+    let name = truncate(
+        &s.service_name(),
+        name_width
+            .saturating_sub(GAP)
+            .saturating_sub(extra_ports.chars().count()),
+    );
+    let pad = name_width
+        .saturating_sub(name.chars().count())
+        .saturating_sub(extra_ports.chars().count());
 
     let mut spans = vec![
         gutter(selected, t),
@@ -498,9 +555,9 @@ fn server_line(s: &Server, t: &Theme, width: usize, selected: bool) -> Line<'sta
         Span::styled(dot, Style::default().fg(dot_color)),
         Span::raw(" "),
         Span::styled(port, Style::default().fg(t.text).bold()),
-        Span::styled(extra_ports, Style::default().fg(t.faint)),
         Span::raw(" "),
         Span::styled(name, Style::default().fg(t.text)),
+        Span::styled(extra_ports, Style::default().fg(t.faint)),
         Span::raw(" ".repeat(pad)),
     ];
     if show_badge {
