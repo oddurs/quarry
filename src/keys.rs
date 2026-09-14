@@ -28,6 +28,7 @@ pub enum Command {
     Filter,
     Back,
     ToggleAll,
+    ToggleHere,
     Refresh,
     Reload,
     Stop,
@@ -39,7 +40,7 @@ pub enum Command {
 }
 
 impl Command {
-    pub const ALL: [Command; 20] = [
+    pub const ALL: [Command; 21] = [
         Command::Down,
         Command::Up,
         Command::PageDown,
@@ -52,6 +53,7 @@ impl Command {
         Command::Filter,
         Command::Back,
         Command::ToggleAll,
+        Command::ToggleHere,
         Command::Refresh,
         Command::Reload,
         Command::Stop,
@@ -78,6 +80,7 @@ impl Command {
             Command::Filter => "filter",
             Command::Back => "back",
             Command::ToggleAll => "toggle-all",
+            Command::ToggleHere => "toggle-here",
             Command::Refresh => "refresh",
             Command::Reload => "reload",
             Command::Stop => "stop",
@@ -108,6 +111,7 @@ impl Command {
             Command::Filter => "filter by project, port, process or kind",
             Command::Back => "back out — clear the filter, close an overlay",
             Command::ToggleAll => "show system services too",
+            Command::ToggleHere => "narrow to the repository you are in",
             Command::Refresh => "rescan now",
             Command::Reload => "reload the config and theme",
             Command::Stop => "stop the process — SIGTERM, with a confirm",
@@ -120,7 +124,7 @@ impl Command {
     }
 
     /// Rows shown in the help overlay, in the order they appear.
-    pub fn help_order() -> [Command; 16] {
+    pub fn help_order() -> [Command; 17] {
         [
             Command::Down,
             Command::First,
@@ -130,6 +134,7 @@ impl Command {
             Command::Filter,
             Command::Back,
             Command::ToggleAll,
+            Command::ToggleHere,
             Command::Refresh,
             Command::Reload,
             Command::Stop,
@@ -174,6 +179,7 @@ impl Default for Keymap {
                 (K::Char('/'), n, C::Filter),
                 (K::Esc, n, C::Back),
                 (K::Char('a'), n, C::ToggleAll),
+                (K::Char('.'), n, C::ToggleHere),
                 (K::Char('r'), n, C::Refresh),
                 (K::Char('r'), ctrl, C::Reload),
                 (K::Char('K'), n, C::Stop),
@@ -329,6 +335,7 @@ impl Keymap {
             (Command::Copy, "copy"),
             (Command::Filter, "filter"),
             (Command::ToggleAll, "all"),
+            (Command::ToggleHere, "here"),
             (Command::Stop, "stop"),
             (Command::Refresh, "refresh"),
             (Command::Help, "help"),

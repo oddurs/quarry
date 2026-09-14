@@ -294,8 +294,8 @@ banner_ms = {banner_ms}
 # 3000 = "/healthz"
 
 # Keys, bound to action names. See `quarry --help` for the defaults.
-# Actions: quit refresh open copy filter toggle-all toggle-group stop
-#          force-kill diagnostics help toggle-mouse reload back
+# Actions: quit refresh open copy filter toggle-all toggle-here toggle-group
+#          stop force-kill diagnostics help toggle-mouse reload back
 #          down up page-down page-up first last
 [keys]
 # "ctrl-r" = "reload"

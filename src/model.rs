@@ -3,7 +3,7 @@
 //! called `node` tells you nothing, but `node` on 5432 vs 5173 does.
 
 use std::net::IpAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
@@ -279,9 +279,61 @@ impl GroupSource {
 #[derive(Clone, Debug, Default)]
 pub struct Repo {
     pub name: String,
+    /// The work tree this process is running in. For a linked worktree that is
+    /// the worktree's own directory, not the repository's.
     pub root: PathBuf,
+    /// The main repository's root — the same path for every worktree of one
+    /// project, and equal to `root` when there are none.
+    ///
+    /// This, rather than the name, is what says two services belong to the
+    /// same project. Names are basenames and two unrelated checkouts called
+    /// `site` are not one repository.
+    pub main_root: PathBuf,
     pub branch: Option<String>,
     pub remote: Option<String>,
+}
+
+/// One project, seen from inside it.
+///
+/// quarry normally answers "what is running on this machine". Started with
+/// `--here` it answers a narrower question — "what is running for the project
+/// I am in" — which is the one you have while working. The answer spans more
+/// than the directory you are standing in: a linked worktree lives somewhere
+/// else entirely, and a Compose stack declared in the repository is part of
+/// the same project even though it runs in a container.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Scope {
+    /// The main repository root. Compared against [`Repo::main_root`], so
+    /// every worktree of this project is in scope and an unrelated checkout
+    /// with the same name is not.
+    pub root: PathBuf,
+    pub name: String,
+    pub remote: Option<String>,
+}
+
+impl Scope {
+    /// The repository containing `dir`, if it is in one.
+    pub fn containing(dir: &Path) -> Option<Scope> {
+        let repo = crate::repo::find(dir)?;
+        Some(Scope {
+            root: repo.main_root,
+            name: repo.name,
+            remote: repo.remote,
+        })
+    }
+
+    /// The repository quarry was started in.
+    pub fn here() -> Option<Scope> {
+        Scope::containing(&std::env::current_dir().ok()?)
+    }
+
+    /// `quarry · oddurs/quarry`, or just the name when there is no remote.
+    pub fn label(&self) -> String {
+        match &self.remote {
+            Some(r) => format!("{} · {r}", self.name),
+            None => self.name.clone(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -540,6 +592,38 @@ impl Server {
         } else {
             "unattributed".into()
         }
+    }
+
+    /// Whether this belongs to the project in scope.
+    ///
+    /// By the repository it resolved to, which is why a container counts: a
+    /// Compose stack is attributed to the directory its file lives in, so a
+    /// database declared in the repository is part of the project as much as
+    /// the server started from a shell in it.
+    pub fn in_scope(&self, scope: &Scope) -> bool {
+        self.repo
+            .as_ref()
+            .is_some_and(|r| r.main_root == scope.root)
+    }
+
+    /// Which checkout of one project this came from.
+    ///
+    /// Inside a single repository, what distinguishes two services is not the
+    /// project — they share it — but the branch. That is also what a person
+    /// calls a worktree: not `.worktrees/quarry/feat/repo-scope` but
+    /// `feat/repo-scope`. A detached head has no branch to call it, so the
+    /// directory does.
+    pub fn worktree_key(&self) -> String {
+        let Some(repo) = &self.repo else {
+            return self.group_key();
+        };
+        if let Some(branch) = &repo.branch {
+            return branch.clone();
+        }
+        repo.root
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| repo.root.display().to_string())
     }
 
     pub fn group_source(&self) -> GroupSource {

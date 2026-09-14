@@ -27,6 +27,53 @@ fn loaded() -> App {
     app
 }
 
+/// The `--here` view: one repository, its worktrees as the groups.
+#[test]
+fn scoped_to_one_repository() {
+    let mut app = App::new();
+    app.ingest(vec![
+        testkit::server(3000, "node")
+            .cmdline("next-server (v16.3.4)")
+            .repo("acme-web", "main")
+            .kind(quarry::model::Kind::Web)
+            .health(quarry::testkit::served(
+                200,
+                9,
+                Some("Acme — Dashboard"),
+                Some("Next.js"),
+            ))
+            .build(),
+        testkit::server(3001, "node")
+            .cmdline("next-server (v16.3.4)")
+            .worktree("acme-web", "feat/billing")
+            .kind(quarry::model::Kind::Web)
+            .health(quarry::testkit::served(200, 14, None, Some("Next.js")))
+            .build(),
+        testkit::server(5432, "postgres")
+            .cmdline("postgres -D /var/lib/postgresql")
+            .worktree("acme-web", "feat/billing")
+            .kind(quarry::model::Kind::Database)
+            .service("PostgreSQL")
+            .build(),
+        // Somewhere else entirely; it must not appear.
+        testkit::server(4000, "node")
+            .cmdline("node server.js")
+            .repo("unrelated", "main")
+            .kind(quarry::model::Kind::Web)
+            .build(),
+    ]);
+    app.scope = Some(quarry::model::Scope {
+        root: std::path::PathBuf::from("/src/acme-web"),
+        name: "acme-web".into(),
+        remote: Some("acme/acme-web".into()),
+    });
+    app.here = true;
+    app.rebuild();
+    app.now = NOW;
+    app.theme = Theme::resolve(SNAPSHOT_THEME).expect("the snapshot theme resolves");
+    assert_snapshot("scoped", &ui::render_to_string(&mut app, 118, 26, 0));
+}
+
 #[test]
 fn standard_screen() {
     let mut app = loaded();

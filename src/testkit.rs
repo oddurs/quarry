@@ -104,10 +104,26 @@ impl ServerBuilder {
         self.server.repo = Some(Repo {
             name: name.to_string(),
             root: PathBuf::from(format!("/src/{name}")),
+            main_root: PathBuf::from(format!("/src/{name}")),
             branch: Some(branch.to_string()),
             remote: Some(format!("acme/{name}")),
         });
         self.server.cwd = Some(PathBuf::from(format!("/src/{name}")));
+        self
+    }
+
+    /// A linked worktree of `name`: a different checkout, on a different
+    /// branch, belonging to the same repository.
+    pub fn worktree(mut self, name: &str, branch: &str) -> Self {
+        let root = PathBuf::from(format!("/src/.worktrees/{name}/{branch}"));
+        self.server.repo = Some(Repo {
+            name: name.to_string(),
+            root: root.clone(),
+            main_root: PathBuf::from(format!("/src/{name}")),
+            branch: Some(branch.to_string()),
+            remote: Some(format!("acme/{name}")),
+        });
+        self.server.cwd = Some(root);
         self
     }
 
