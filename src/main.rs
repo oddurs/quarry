@@ -12,6 +12,7 @@ use quarry::app::{Action, App, ToastKind};
 use quarry::config::Config;
 use quarry::engine::Engine;
 use quarry::keys::Keymap;
+use quarry::lifecycle;
 use quarry::model::Rules;
 use quarry::probe::{NetProber, Pool, Target};
 use quarry::runtime::{self, Msg, Settings};
@@ -644,6 +645,21 @@ fn event_loop(
                 } => app.apply_health(pid, port, health, banner),
                 Msg::ScanFailed { detail, transient } => app.scan_failed(detail, transient),
                 Msg::Warning(w) => app.warn(w),
+                Msg::Outcome { text, good } => {
+                    app.toast(
+                        text,
+                        if good {
+                            ToastKind::Good
+                        } else {
+                            ToastKind::Bad
+                        },
+                    );
+                    // The service list is wrong the moment something stops or
+                    // starts, and the user is looking straight at it.
+                    if good {
+                        handle.refresh();
+                    }
+                }
             }
             dirty = true;
         }
@@ -736,21 +752,22 @@ fn dispatch(
             Ok(()) => app.toast(format!("copied {text}"), ToastKind::Good),
             Err(e) => app.toast(format!("clipboard unavailable: {e}"), ToastKind::Bad),
         },
-        Action::Signal { pid, force } => {
-            let sig = if force { "-KILL" } else { "-TERM" };
-            let ok = Command::new("kill")
-                .args([sig, &pid.to_string()])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false);
-            if ok {
-                app.toast(format!("sent {sig} to {pid}"), ToastKind::Good);
-                handle.refresh();
-            } else {
-                app.toast(format!("could not signal {pid}"), ToastKind::Bad);
-            }
+        Action::Lifecycle { target, op } => {
+            // On a worker: a stop waits out a grace period and a restart waits
+            // for the process to exit and the port to settle. Seconds, either
+            // way, and the UI has to stay answerable throughout.
+            app.toast(format!("{}…", op.in_progress()), ToastKind::Info);
+            let tx = handle.outbox();
+            std::thread::Builder::new()
+                .name("quarry-lifecycle".into())
+                .spawn(move || {
+                    let msg = match lifecycle::perform(&target, op) {
+                        Ok(text) => Msg::Outcome { text, good: true },
+                        Err(text) => Msg::Outcome { text, good: false },
+                    };
+                    let _ = tx.send(msg);
+                })
+                .map_err(|e| anyhow::anyhow!("could not start a worker: {e}"))?;
         }
     }
     Ok(false)

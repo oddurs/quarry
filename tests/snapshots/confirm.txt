@@ -6,8 +6,8 @@
 │ ▾ acme-web  main  acme/acme-web             ✕1  2││                                              │
 │  ●  3000 next-server╭──────────────────────────────────────────────────────╮                     │
 │  ▲  3001 node worker│                                                      │ ↗                   │
-│ ▾ no project        │  Stop acme-api (pid 18000)?                          │                     │
-│  ●  5432 postgres   │  python3 on :8000                                    │                     │
+│ ▾ no project        │  Stop acme-api?                                      │                     │
+│  ●  5432 postgres   │  SIGTERM 18000 · python3 on :8000                    │                     │
 │  ✕  6379 redis-serve│                                                      │                     │
 │                     │  y confirm    n / esc cancel                         │                     │
 │                     ╰──────────────────────────────────────────────────────╯                     │
@@ -17,4 +17,4 @@
 │                                                  ││ REPOSITORY                                   │
 │                                                  ││   acme-api                                   │
 ╰──────────────────────────────────────────────────╯╰──────────────────────────────────────────────╯
- ↑↓ move  ↵ open  y copy  / filter  a all  K stop  r refresh  ? help
+ ↑↓ move  ↵ open  y copy  / filter  a all  K stop  R restart  r refresh  ? help
