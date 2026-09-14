@@ -27,6 +27,109 @@ fn loaded() -> App {
     app
 }
 
+/// The `--here` view: one repository, its worktrees as the groups.
+#[test]
+fn scoped_to_one_repository() {
+    let mut app = App::new();
+    app.ingest(vec![
+        testkit::server(3000, "node")
+            .cmdline("next-server (v16.3.4)")
+            .repo("acme-web", "main")
+            .kind(quarry::model::Kind::Web)
+            .health(quarry::testkit::served(
+                200,
+                9,
+                Some("Acme — Dashboard"),
+                Some("Next.js"),
+            ))
+            .build(),
+        testkit::server(3001, "node")
+            .cmdline("next-server (v16.3.4)")
+            .worktree("acme-web", "feat/billing")
+            .kind(quarry::model::Kind::Web)
+            .health(quarry::testkit::served(200, 14, None, Some("Next.js")))
+            .build(),
+        testkit::server(5432, "postgres")
+            .cmdline("postgres -D /var/lib/postgresql")
+            .worktree("acme-web", "feat/billing")
+            .kind(quarry::model::Kind::Database)
+            .service("PostgreSQL")
+            .build(),
+        // Somewhere else entirely; it must not appear.
+        testkit::server(4000, "node")
+            .cmdline("node server.js")
+            .repo("unrelated", "main")
+            .kind(quarry::model::Kind::Web)
+            .build(),
+    ]);
+    app.scope = Some(quarry::model::Scope {
+        root: std::path::PathBuf::from("/src/acme-web"),
+        name: "acme-web".into(),
+        remote: Some("acme/acme-web".into()),
+    });
+    app.here = true;
+    app.rebuild();
+    app.now = NOW;
+    app.theme = Theme::resolve(SNAPSHOT_THEME).expect("the snapshot theme resolves");
+    assert_snapshot("scoped", &ui::render_to_string(&mut app, 118, 26, 0));
+}
+
+/// `tab` gives the list the whole width.
+#[test]
+fn without_the_detail_pane() {
+    let mut app = loaded();
+    app.detail = false;
+    assert_snapshot("no_detail", &ui::render_to_string(&mut app, 118, 16, 0));
+}
+
+/// And a terminal too narrow to afford both drops it without being asked —
+/// half of eighty columns is not enough for either pane.
+#[test]
+fn a_narrow_terminal_drops_the_detail_pane() {
+    let mut app = loaded();
+    let screen = ui::render_to_string(&mut app, 84, 16, 0);
+    assert!(
+        !screen.contains("Detail"),
+        "the detail pane survived a terminal that cannot afford it:\n{screen}"
+    );
+    assert!(screen.contains("Services"), "{screen}");
+}
+
+/// The latency was measured either way; a blank column read as "not checked".
+#[test]
+fn a_non_http_service_still_shows_what_it_cost() {
+    let mut app = loaded();
+    let screen = ui::render_to_string(&mut app, 118, 20, 0);
+    let line = screen
+        .lines()
+        .find(|l| l.contains("5432"))
+        .expect("the postgres row");
+    assert!(line.contains("open"), "{line}");
+    assert!(
+        line.chars().any(|c| c.is_ascii_digit()) && line.contains("ms"),
+        "no latency beside `open`: {line}"
+    );
+}
+
+/// Grouped by kind: every database together, whatever project it came from.
+#[test]
+fn grouped_by_kind() {
+    let mut app = loaded();
+    app.group_by = quarry::model::GroupBy::Kind;
+    app.rebuild();
+    assert_snapshot("by_kind", &ui::render_to_string(&mut app, 118, 16, 0));
+}
+
+/// One flat list, newest first — no headings at all, and the pane says so.
+#[test]
+fn flat_and_newest_first() {
+    let mut app = loaded();
+    app.group_by = quarry::model::GroupBy::Nothing;
+    app.sort_by = quarry::model::SortBy::Newest;
+    app.rebuild();
+    assert_snapshot("flat", &ui::render_to_string(&mut app, 118, 14, 0));
+}
+
 #[test]
 fn standard_screen() {
     let mut app = loaded();
@@ -187,7 +290,7 @@ fn help_overlay() {
 #[test]
 fn confirm_overlay() {
     let mut app = loaded();
-    app.ask_kill(false);
+    app.ask(quarry::lifecycle::Op::Stop);
     assert_snapshot("confirm", &ui::render_to_string(&mut app, 100, 20, 0));
 }
 
