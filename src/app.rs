@@ -9,7 +9,7 @@ use ratatui::layout::Rect;
 use crate::diag;
 use crate::keys::{Command, Keymap};
 use crate::lifecycle::{Op, Target};
-use crate::model::{GroupSource, Health, Rules, Scope, Server};
+use crate::model::{GroupSource, Health, Query, Rules, Scope, Server};
 use crate::signature::{Evidence, Registry};
 use crate::theme::Theme;
 
@@ -39,7 +39,10 @@ pub enum Action {
     /// confirmation, and always carried out on a worker: a stop waits on a
     /// grace period, and the UI must not wait with it.
     Lifecycle {
-        target: Target,
+        /// More than one when a whole group was selected. A worktree is a unit
+        /// people think in — "restart this branch" — and doing it one row at a
+        /// time is four confirmations for one intention.
+        targets: Vec<Target>,
         op: Op,
     },
 }
@@ -76,7 +79,7 @@ pub struct Confirm {
 
 #[derive(Clone)]
 pub enum PendingAction {
-    Lifecycle { target: Target, op: Op },
+    Lifecycle { targets: Vec<Target>, op: Op },
 }
 
 pub struct App {
@@ -96,6 +99,9 @@ pub struct App {
     pub collapsed: HashSet<String>,
     pub search: String,
     pub searching: bool,
+    /// Whether the detail pane is on screen. The list is what you read; the
+    /// detail is what you look up, so it can get out of the way.
+    pub detail: bool,
     pub show_all: bool,
     /// The repository quarry was started in, if it was started in one. Found
     /// once: the working directory cannot change while it runs.
@@ -158,6 +164,7 @@ impl App {
             collapsed: HashSet::new(),
             search: String::new(),
             searching: false,
+            detail: true,
             show_all: false,
             scope: None,
             here: false,
@@ -187,14 +194,48 @@ impl App {
 
         // Carry health forward so rows do not blink back to "checking" on every
         // refresh; the probe results for the new scan overwrite it shortly.
+        //
+        // The same walk answers what changed. quarry rescans every few seconds
+        // and has always known exactly what appeared and vanished; saying so is
+        // the difference between a tool you run and one you leave open.
+        let watching = self.last_scan.is_some();
+        let now = Instant::now();
         for s in fresh.iter_mut() {
-            if let Some(prev) = self
+            match self
                 .servers
                 .iter()
                 .find(|p| p.pid == s.pid && p.primary_port() == s.primary_port())
             {
-                s.health = prev.health.clone();
+                Some(prev) => {
+                    s.health = prev.health.clone();
+                    s.appeared = prev.appeared;
+                }
+                // The first scan is not news. Marking every service on the
+                // machine as new would be true and useless.
+                None => s.appeared = watching.then_some(now),
             }
+        }
+
+        let gone: Vec<String> = self
+            .servers
+            .iter()
+            .filter(|p| {
+                !fresh
+                    .iter()
+                    .any(|s| s.pid == p.pid && s.primary_port() == p.primary_port())
+            })
+            .map(|p| format!("{} {}", p.title(), p.primary_label()))
+            .collect();
+        if watching && !gone.is_empty() {
+            // A departure leaves no row to mark, so it has to be said once
+            // rather than shown. Two names and a count, because a toast
+            // listing nine services is a toast nobody finishes reading.
+            let text = match gone.len() {
+                1 => format!("{} stopped", gone[0]),
+                2 => format!("{} and {} stopped", gone[0], gone[1]),
+                n => format!("{}, {} and {} more stopped", gone[0], gone[1], n - 2),
+            };
+            self.toast(text, ToastKind::Info);
         }
 
         self.by_pid.clear();
@@ -357,7 +398,7 @@ impl App {
         }
     }
 
-    fn visible(&self, s: &Server, needle: &str) -> bool {
+    fn visible(&self, s: &Server, query: &Query) -> bool {
         // Narrowing to a project is one more filter, not a different mode.
         // `-a` has to keep meaning what it means everywhere else, or a repo
         // with a couple of unix sockets in it looks like it has servers.
@@ -375,7 +416,7 @@ impl App {
         if !self.show_all && s.is_socket_only() {
             return false;
         }
-        if !needle.is_empty() && !s.matches(needle) {
+        if !query.is_empty() && !s.satisfies(query) {
             return false;
         }
         true
@@ -406,14 +447,27 @@ impl App {
             .map(|s| s.group_source().rank())
             .collect();
 
-        // Lowercased once here rather than once per service per keystroke.
-        let needle = self.search.to_lowercase();
+        // Parsed once here rather than once per service per keystroke.
+        let query = Query::parse(&self.search);
         let mut indices: Vec<usize> = (0..self.servers.len())
-            .filter(|i| self.visible(&self.servers[*i], &needle))
+            .filter(|i| self.visible(&self.servers[*i], &query))
             .collect();
+
+        // A group holding something broken sorts first. The one row that needs
+        // attention was reliably the hardest to reach: unattributed services
+        // sort last by rank, and a stray broken container is exactly the kind
+        // of thing that has no project.
+        let mut troubled: std::collections::HashSet<&str> = Default::default();
+        for i in &indices {
+            if self.servers[*i].health.is_trouble() {
+                troubled.insert(keys[*i].as_str());
+            }
+        }
+        let calm = |i: usize| !troubled.contains(keys[i].as_str());
         indices.sort_by(|a, b| {
-            ranks[*a]
-                .cmp(&ranks[*b])
+            calm(*a)
+                .cmp(&calm(*b))
+                .then_with(|| ranks[*a].cmp(&ranks[*b]))
                 .then_with(|| keys[*a].cmp(&keys[*b]))
                 .then_with(|| {
                     self.servers[*a]
@@ -636,6 +690,49 @@ impl App {
         }
     }
 
+    /// Move to the next service that is not answering, wrapping around.
+    ///
+    /// A collapsed group is expanded to get there. The alternative is a key
+    /// that reports trouble it will not show you.
+    pub fn jump_to_trouble(&mut self, forward: bool) {
+        if !self.servers.iter().any(|s| s.health.is_trouble()) {
+            self.toast("everything is answering".to_string(), ToastKind::Good);
+            return;
+        }
+        let hidden: Vec<String> = self
+            .groups
+            .iter()
+            .filter(|g| g.trouble > 0 && self.collapsed.contains(&g.key))
+            .map(|g| g.key.clone())
+            .collect();
+        if !hidden.is_empty() {
+            for key in hidden {
+                self.collapsed.remove(&key);
+            }
+            self.rebuild();
+        }
+
+        let n = self.rows.len();
+        let broken = |row: &Row| match row {
+            Row::Server(i) => self.servers[*i].health.is_trouble(),
+            Row::Group(_) => false,
+        };
+        // From the row after this one, so repeated presses walk the list
+        // rather than sticking on whatever is already selected.
+        let found = (1..=n).find_map(|step| {
+            let i = if forward {
+                (self.selected + step) % n
+            } else {
+                (self.selected + n - step % n) % n
+            };
+            broken(&self.rows[i]).then_some(i)
+        });
+        if let Some(i) = found {
+            // The renderer follows the selection; nothing to scroll here.
+            self.selected = i;
+        }
+    }
+
     /// The scope, if one was found *and* is being applied.
     pub fn scoped(&self) -> Option<&Scope> {
         self.here.then_some(self.scope.as_ref()).flatten()
@@ -672,19 +769,52 @@ impl App {
     /// the kernel owns the service, and a confirmation that hides the
     /// difference is not a confirmation.
     pub fn ask(&mut self, op: Op) {
+        let verb = match op {
+            Op::Stop => "Stop",
+            Op::Restart => "Restart",
+            Op::Kill => "Force kill",
+        };
+        // A group heading is a selection too, and a worktree is a unit people
+        // think in: "restart this branch" rather than four rows in turn.
+        if let Some(group) = self.selected_group() {
+            let key = group.key.clone();
+            let members = self.servers_in(&key);
+            let n = members.len();
+            if n == 0 {
+                return;
+            }
+            let targets: Vec<Target> = members.iter().map(|s| s.lifecycle()).collect();
+            let containers = targets
+                .iter()
+                .filter(|t| matches!(t, Target::Container(_)))
+                .count();
+            // What is about to happen differs by who owns each service, and
+            // with several at once the honest summary is the split.
+            let detail = match (containers, n - containers) {
+                (0, _) => format!("{}, one at a time", plural(n, "process", "processes")),
+                (_, 0) => format!(
+                    "{}, through their runtime",
+                    plural(n, "container", "containers")
+                ),
+                (c, p) => format!(
+                    "{} and {}, one at a time",
+                    plural(c, "container", "containers"),
+                    plural(p, "process", "processes")
+                ),
+            };
+            self.confirm = Some(Confirm {
+                prompt: format!("{verb} all of {key}?"),
+                detail,
+                action: PendingAction::Lifecycle { targets, op },
+            });
+            return;
+        }
+
         let Some(s) = self.selected_server() else {
             return;
         };
         let target = s.lifecycle();
-        let prompt = format!(
-            "{} {}?",
-            match op {
-                Op::Stop => "Stop",
-                Op::Restart => "Restart",
-                Op::Kill => "Force kill",
-            },
-            s.title()
-        );
+        let prompt = format!("{verb} {}?", s.title());
         // ":8000" rather than the bare "8000" the list column shows — in a
         // sentence the colon is what makes it read as a port.
         let at = match s.primary() {
@@ -715,7 +845,10 @@ impl App {
         self.confirm = Some(Confirm {
             prompt,
             detail,
-            action: PendingAction::Lifecycle { target, op },
+            action: PendingAction::Lifecycle {
+                targets: vec![target],
+                op,
+            },
         });
     }
 
@@ -727,7 +860,7 @@ impl App {
             return Action::None;
         }
         match c.action {
-            PendingAction::Lifecycle { target, op } => Action::Lifecycle { target, op },
+            PendingAction::Lifecycle { targets, op } => Action::Lifecycle { targets, op },
         }
     }
 
@@ -818,6 +951,9 @@ impl App {
             }
             Command::Reload => return Action::Reload,
             Command::ToggleHere => self.toggle_here(),
+            Command::ToggleDetail => self.detail = !self.detail,
+            Command::NextTrouble => self.jump_to_trouble(true),
+            Command::PrevTrouble => self.jump_to_trouble(false),
             Command::Stop => self.ask(Op::Stop),
             Command::Restart => self.ask(Op::Restart),
             Command::ForceKill => self.ask(Op::Kill),
@@ -894,11 +1030,11 @@ impl App {
             }
         }
         let counted: usize = self.groups.iter().map(|g| g.count).sum();
-        let needle = self.search.to_lowercase();
+        let query = Query::parse(&self.search);
         let visible = self
             .servers
             .iter()
-            .filter(|s| self.visible(s, &needle))
+            .filter(|s| self.visible(s, &query))
             .count();
         if counted != visible {
             return Err(format!(
@@ -914,4 +1050,9 @@ fn unix_seconds() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+/// `1 container`, `3 containers`.
+fn plural(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
 }

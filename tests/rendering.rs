@@ -74,6 +74,43 @@ fn scoped_to_one_repository() {
     assert_snapshot("scoped", &ui::render_to_string(&mut app, 118, 26, 0));
 }
 
+/// `tab` gives the list the whole width.
+#[test]
+fn without_the_detail_pane() {
+    let mut app = loaded();
+    app.detail = false;
+    assert_snapshot("no_detail", &ui::render_to_string(&mut app, 118, 16, 0));
+}
+
+/// And a terminal too narrow to afford both drops it without being asked —
+/// half of eighty columns is not enough for either pane.
+#[test]
+fn a_narrow_terminal_drops_the_detail_pane() {
+    let mut app = loaded();
+    let screen = ui::render_to_string(&mut app, 84, 16, 0);
+    assert!(
+        !screen.contains("Detail"),
+        "the detail pane survived a terminal that cannot afford it:\n{screen}"
+    );
+    assert!(screen.contains("Services"), "{screen}");
+}
+
+/// The latency was measured either way; a blank column read as "not checked".
+#[test]
+fn a_non_http_service_still_shows_what_it_cost() {
+    let mut app = loaded();
+    let screen = ui::render_to_string(&mut app, 118, 20, 0);
+    let line = screen
+        .lines()
+        .find(|l| l.contains("5432"))
+        .expect("the postgres row");
+    assert!(line.contains("open"), "{line}");
+    assert!(
+        line.chars().any(|c| c.is_ascii_digit()) && line.contains("ms"),
+        "no latency beside `open`: {line}"
+    );
+}
+
 #[test]
 fn standard_screen() {
     let mut app = loaded();

@@ -4,7 +4,7 @@
 
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub enum Kind {
@@ -336,6 +336,57 @@ impl Scope {
     }
 }
 
+/// What the filter box is asking for.
+///
+/// Plain words match anything about a service, which is the right default —
+/// most of the time you half-remember one thing about it. But "3000" also
+/// matches a pid, a latency and a command line, and `db` matches every
+/// database *and* every path with `db` in it. A prefix narrows the question to
+/// one field, and several terms narrow together.
+///
+/// `:3000 @web` — web servers on a port containing 3000.
+/// `~acme` — anything belonging to the acme project.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Query {
+    terms: Vec<Term>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Term {
+    /// `:3000` — the port.
+    Port(String),
+    /// `@web` — the kind.
+    Kind(String),
+    /// `~acme` — the project.
+    Project(String),
+    /// Anything at all.
+    Any(String),
+}
+
+impl Query {
+    pub fn parse(text: &str) -> Query {
+        let terms = text
+            .split_whitespace()
+            .filter_map(|word| {
+                let (term, rest) = match word.split_at_checked(1) {
+                    Some((":", rest)) => (Term::Port as fn(String) -> Term, rest),
+                    Some(("@", rest)) => (Term::Kind as fn(String) -> Term, rest),
+                    Some(("~", rest)) => (Term::Project as fn(String) -> Term, rest),
+                    _ => (Term::Any as fn(String) -> Term, word),
+                };
+                // A lone `:` is someone part-way through typing, not a term
+                // that matches everything.
+                (!rest.is_empty()).then(|| term(rest.to_lowercase()))
+            })
+            .collect();
+        Query { terms }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.terms.is_empty()
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub enum Health {
     #[default]
@@ -492,6 +543,10 @@ pub struct Server {
     /// The container behind this port, where the runtime published one.
     pub container: Option<crate::docker::Container>,
     pub started_at: u64,
+    /// When quarry first saw this listening, if it appeared while quarry was
+    /// watching. `None` for anything that was already there — the first scan
+    /// is not news, and marking the whole machine as new would say nothing.
+    pub appeared: Option<Instant>,
     pub cpu: f32,
     pub mem: u64,
     pub health: Health,
@@ -676,6 +731,18 @@ impl Server {
 
     /// Whether a filter matches. `needle` must already be lowercase — the
     /// caller lowercases once rather than every service lowercasing it again.
+    /// Every term has to match. Terms narrow; they do not accumulate
+    /// alternatives — `:3000 @web` means both, which is the only reading that
+    /// makes typing a second term useful.
+    pub fn satisfies(&self, query: &Query) -> bool {
+        query.terms.iter().all(|term| match term {
+            Term::Port(p) => self.listeners.iter().any(|l| port_contains(l.port, p)),
+            Term::Kind(k) => contains_ci(self.kind.label(), k),
+            Term::Project(r) => contains_ci(&self.group_key(), r),
+            Term::Any(word) => self.matches(word),
+        })
+    }
+
     pub fn matches(&self, needle: &str) -> bool {
         if needle.is_empty() {
             return true;

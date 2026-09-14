@@ -18,6 +18,13 @@ use crate::theme::Theme;
 
 const SPINNER: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
 
+/// What the detail pane needs: two borders, an indent, and the longest line it
+/// holds — a path, or `usage   0.5% cpu · 64 MB rss`.
+const DETAIL_WIDTH: u16 = 46;
+
+/// Below this the list is not worth reading, so the detail pane gives way.
+const MIN_LIST: u16 = 44;
+
 pub fn draw(f: &mut Frame, app: &mut App, tick: usize) {
     // Cloned once per frame rather than borrowed, so the drawing code can keep
     // taking `&mut App` for hit-test bookkeeping.
@@ -36,14 +43,28 @@ pub fn draw(f: &mut Frame, app: &mut App, tick: usize) {
     draw_titlebar(f, app, &t, chunks[0], tick);
     draw_rule(f, &t, chunks[1]);
 
+    // A share of the width was the wrong model. The detail pane holds short
+    // key-value lines and needs about as much room whatever the terminal is;
+    // half of a wide one was waste, and half of a narrow one starved the list
+    // that was being read. So it takes a fixed width, the list takes the rest,
+    // and on a terminal too narrow to afford both it goes away.
+    let show_detail = app.detail && area.width >= DETAIL_WIDTH + MIN_LIST;
     let split = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(52), Constraint::Percentage(48)])
+        .constraints(if show_detail {
+            [Constraint::Min(MIN_LIST), Constraint::Length(DETAIL_WIDTH)]
+        } else {
+            [Constraint::Percentage(100), Constraint::Length(0)]
+        })
         .split(chunks[2]);
 
     app.list_area = split[0];
     draw_list(f, app, &t, split[0]);
-    draw_detail(f, app, &t, split[1]);
+    if show_detail {
+        draw_detail(f, app, &t, split[1]);
+    } else {
+        app.url_hitbox = None;
+    }
     draw_status(f, app, &t, chunks[3]);
 
     if app.help {
@@ -237,9 +258,12 @@ fn draw_list(f: &mut Frame, app: &mut App, t: &Theme, area: Rect) {
         .enumerate()
         .map(|(i, row)| {
             let selected = i == cursor;
+            // Capped for both, or a folded group's count would sit against the
+            // pane edge while the rows beneath it stopped short.
+            let row_width = inner_width.min(ROW_MAX);
             let line = match row {
-                Row::Group(g) => group_line(app, t, *g, inner_width, selected),
-                Row::Server(s) => server_line(&app.servers[*s], t, inner_width, selected),
+                Row::Group(g) => group_line(app, t, *g, row_width, selected),
+                Row::Server(s) => server_line(&app.servers[*s], t, row_width, selected),
             };
             // Reverse video inverts whatever colour it finds, so a row of many
             // colours becomes a bar striped in as many. Flattened first, it
@@ -307,6 +331,15 @@ fn gutter(selected: bool, t: &Theme) -> Span<'static> {
         Span::raw(" ")
     }
 }
+
+/// The widest a row's content is allowed to get.
+///
+/// A row carries a port, a name, a kind and a status — around seventy columns
+/// of information. Stretched across a wide pane the name ends up on the far
+/// left and the status on the far right with nothing in between, and the eye
+/// has to cross the gap on every line. Past this, the pane gets a right margin
+/// instead.
+const ROW_MAX: usize = 72;
 
 fn group_line(app: &App, t: &Theme, idx: usize, width: usize, selected: bool) -> Line<'static> {
     let g = &app.groups[idx];
@@ -378,8 +411,20 @@ fn group_line(app: &App, t: &Theme, idx: usize, width: usize, selected: bool) ->
     Line::from(spans)
 }
 
+/// How long a newly-appeared service is marked as new. Long enough to catch
+/// your eye on the way back from starting it, short enough that the screen is
+/// not permanently decorated.
+const FRESH: Duration = Duration::from_secs(8);
+
 fn server_line(s: &Server, t: &Theme, width: usize, selected: bool) -> Line<'static> {
     let (dot, dot_color) = (s.health.glyph(), t.health(&s.health));
+    // The column between the selection bar and the health dot was already a
+    // blank space, so marking an arrival costs no width and shifts nothing.
+    let fresh = if s.appeared.is_some_and(|at| at.elapsed() < FRESH) {
+        Span::styled("+", Style::default().fg(t.accent).bold())
+    } else {
+        Span::raw(" ")
+    };
     let port = format!("{:>5}", s.primary_label());
     let extra_ports = if s.listeners.len() > 1 {
         format!(" +{}", s.listeners.len() - 1)
@@ -413,7 +458,7 @@ fn server_line(s: &Server, t: &Theme, width: usize, selected: bool) -> Line<'sta
 
     let mut spans = vec![
         gutter(selected, t),
-        Span::raw(" "),
+        fresh,
         Span::styled(dot, Style::default().fg(dot_color)),
         Span::raw(" "),
         Span::styled(port, Style::default().fg(t.text).bold()),
@@ -457,7 +502,10 @@ fn status_cell(h: &Health, t: &Theme) -> (String, ratatui::style::Color) {
             };
             (format!("{status} {:>6}", crate::model::fmt_ms(*latency)), c)
         }
-        Health::Open { .. } => ("open      ".to_string(), t.open),
+        // The latency was measured; dropping it read as "not checked" rather
+        // than "checked, and not HTTP". Padded to the width of a status line
+        // so the column does not move.
+        Health::Open { latency } => (format!("open{:>6}", crate::model::fmt_ms(*latency)), t.open),
         Health::Bound => ("bound     ".to_string(), t.open),
         Health::Closed => ("no answer ".to_string(), t.server_error),
         Health::Unknown => ("···       ".to_string(), t.faint),
@@ -533,7 +581,16 @@ fn draw_detail(f: &mut Frame, app: &mut App, t: &Theme, area: Rect) {
         lines.push(Line::from(vec![
             Span::raw("  "),
             Span::styled(s.url(), Style::default().fg(t.secondary)),
-            Span::styled("  (copied, not opened)", Style::default().fg(t.faint)),
+        ]));
+        // On its own line. Beside a long URI it wrapped through the middle of
+        // the parenthesis, which looked like a rendering fault rather than a
+        // note about what enter will do.
+        lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled(
+                "enter copies this, it cannot be opened",
+                Style::default().fg(t.faint),
+            ),
         ]));
     }
     lines.push(Line::from(""));
@@ -792,7 +849,13 @@ fn draw_status(f2: &mut Frame, app: &App, t: &Theme, area: Rect) {
             Span::styled(app.search.clone(), Style::default().fg(t.text)),
             Span::styled("▏", Style::default().fg(t.accent)),
             Span::styled(
-                "   enter to keep · esc to clear",
+                // The syntax is worth teaching, and an empty box is the only
+                // moment it is not in the way.
+                if app.search.is_empty() {
+                    "   :port  @kind  ~project  or any words"
+                } else {
+                    "   enter to keep · esc to clear"
+                },
                 Style::default().fg(t.faint),
             ),
         ]);

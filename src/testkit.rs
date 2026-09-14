@@ -92,6 +92,7 @@ pub fn server(port: u16, command: &str) -> ServerBuilder {
             evidence: Vec::new(),
             container: None,
             started_at: 1_700_000_000,
+            appeared: None,
             cpu: 0.5,
             mem: 64 * 1024 * 1024,
             health: Health::Unknown,

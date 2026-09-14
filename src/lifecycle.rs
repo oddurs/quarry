@@ -74,6 +74,15 @@ impl Op {
         }
     }
 
+    /// For a toast raised after the fact.
+    pub fn past(self) -> &'static str {
+        match self {
+            Op::Stop => "stopped",
+            Op::Restart => "restarted",
+            Op::Kill => "killed",
+        }
+    }
+
     /// For a toast raised while it is still happening. Spelled out rather than
     /// built from [`Op::verb`], which would produce "stoping".
     pub fn in_progress(self) -> &'static str {

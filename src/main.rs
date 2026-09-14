@@ -12,7 +12,7 @@ use quarry::app::{Action, App, ToastKind};
 use quarry::config::Config;
 use quarry::engine::Engine;
 use quarry::keys::Keymap;
-use quarry::lifecycle;
+use quarry::lifecycle::{self, Op};
 use quarry::model::Rules;
 use quarry::probe::{NetProber, Pool, Target};
 use quarry::runtime::{self, Msg, Settings};
@@ -825,7 +825,7 @@ fn dispatch(
             Ok(()) => app.toast(format!("copied {text}"), ToastKind::Good),
             Err(e) => app.toast(format!("clipboard unavailable: {e}"), ToastKind::Bad),
         },
-        Action::Lifecycle { target, op } => {
+        Action::Lifecycle { targets, op } => {
             // On a worker: a stop waits out a grace period and a restart waits
             // for the process to exit and the port to settle. Seconds, either
             // way, and the UI has to stay answerable throughout.
@@ -834,16 +834,54 @@ fn dispatch(
             std::thread::Builder::new()
                 .name("quarry-lifecycle".into())
                 .spawn(move || {
-                    let msg = match lifecycle::perform(&target, op) {
-                        Ok(text) => Msg::Outcome { text, good: true },
-                        Err(text) => Msg::Outcome { text, good: false },
-                    };
-                    let _ = tx.send(msg);
+                    // One at a time. Restarting four services at once means
+                    // four processes racing for ports their predecessors have
+                    // not finished releasing.
+                    let mut done = Vec::new();
+                    let mut failed = Vec::new();
+                    for target in &targets {
+                        match lifecycle::perform(target, op) {
+                            Ok(text) => done.push(text),
+                            Err(text) => failed.push(text),
+                        }
+                    }
+                    let _ = tx.send(summarise(op, done, failed));
                 })
                 .map_err(|e| anyhow::anyhow!("could not start a worker: {e}"))?;
         }
     }
     Ok(false)
+}
+
+/// One toast for however many services were acted on.
+///
+/// A single service reports in its own words — "restarted as pid 4821" says
+/// more than "1 restarted". Several report as a count, because nine lines of
+/// detail in a toast is nothing anyone reads, and a failure is named first:
+/// that is the part you have to do something about.
+fn summarise(op: Op, done: Vec<String>, failed: Vec<String>) -> Msg {
+    match (done.len(), failed.len()) {
+        (1, 0) => Msg::Outcome {
+            text: done.into_iter().next().expect("one"),
+            good: true,
+        },
+        (0, 1) => Msg::Outcome {
+            text: failed.into_iter().next().expect("one"),
+            good: false,
+        },
+        (n, 0) => Msg::Outcome {
+            text: format!("{n} services {}", op.past()),
+            good: true,
+        },
+        (0, n) => Msg::Outcome {
+            text: format!("none of {n} could be {}: {}", op.past(), failed[0]),
+            good: false,
+        },
+        (n, f) => Msg::Outcome {
+            text: format!("{n} done, {f} failed — {}", failed[0]),
+            good: false,
+        },
+    }
 }
 
 fn copy_to_clipboard(text: &str) -> std::io::Result<()> {
