@@ -24,8 +24,39 @@ uses that — a repo name is shown in magenta, a plain folder in teal.
 │  ●  4320 node serve      web  404  2ms ││   http://localhost:4470  ↗                   │
 │  ●  4330 node astro.mjs  web  500  3ms ││ ...                                          │
 ╰────────────────────────────────────────╯╰──────────────────────────────────────────────╯
- ↑↓ move  ↵ open  y copy  / filter  a all  K stop  r refresh  ? help
+ ↑↓ move  ↵ open  y copy  / filter  a all  . here  K stop  R restart  r refresh  ? help
 ```
+
+## One project at a time
+
+`quarry --here` answers a narrower question than "what is running on this
+machine": what is running for the project I am in. Press `.` to switch between
+the two without restarting.
+
+```
+ quarry  acme-web acme/acme-web  3 listening · 2 worktrees                    updated just now
+──────────────────────────────────────────────────────────────────────────────────────────────
+╭ Services ─────────────────────────────────────────────────╮╭ Detail ─────────────────────────
+│ ▾ feat/billing                                           2││ ● acme-web
+│▌ ●  3001 next-server                      web  200   14ms ││   next-server · web · pid 13001
+│  ○  5432 PostgreSQL                        db  ···        ││
+│ ▾ main                                                   1││ ADDRESS
+│  ●  3000 next-server                      web  200  9.0ms ││   http://localhost:3001  ↗
+```
+
+The groups are worktrees, not projects — inside one repository the project name
+is on every row and tells you nothing, while the branch is what distinguishes
+two copies of the same server on two ports. A linked worktree counts even
+though it lives somewhere else on disk, and a Compose stack counts even though
+it runs in a container: both are attributed to the repository, so both are part
+of the project.
+
+Two unrelated checkouts can be called `site`. quarry compares repository roots
+rather than names, so they do not become one project.
+
+`-p --here` prints the same thing one line per service, with the branch in
+place of the project. `--here` outside a repository is an error rather than a
+quiet fall back to the whole machine.
 
 ## What it knows
 
@@ -148,16 +179,66 @@ quarry --fix-terminal         # undo a terminal left in mouse-reporting mode
 | `enter` / `o` | open the URL in your browser |
 | click | select a row, or open the URL in the detail pane |
 | `y` | copy the URL to the clipboard |
-| `/` | filter by repo, port, process or kind |
+| `/` | filter — `:port`, `@kind`, `~project`, or any words |
 | `a` | include system services |
+| `.` | narrow to the repository you are in |
+| `tab` | hide the detail pane — the list takes the width |
+| `n` / `N` | jump between services that are not answering |
 | `esc` | back out — clear the filter, close an overlay |
 | `r` | rescan now |
-| `K` / `X` | SIGTERM / SIGKILL the process, with a confirm |
+| `K` / `R` | stop or restart it — or a whole group, with a confirm |
+| `X` | force kill — SIGKILL, with a confirm |
 | `d` | diagnostics — what failed, and why |
 | `ctrl-r` | reload the config and theme |
 | `m` | toggle mouse capture — off restores native text selection |
 | `?` | help |
 | `q` | quit |
+
+### Reading the screen
+
+The list is what you read; the detail pane is what you look up. So the detail
+pane takes a fixed width rather than a share of the terminal — a share meant
+half a wide terminal went to a key-value sheet that rarely changes, and half a
+narrow one starved the list beside it. `tab` hides it, and a terminal too
+narrow for both drops it without being asked.
+
+A group holding something that is not answering sorts to the top, and `n` and
+`N` jump between the broken ones, opening a folded group to get there. Before
+this, unattributed services sorted last — so a stray broken container, which is
+exactly the kind of thing that has no project, was reliably the row furthest
+down.
+
+A service that starts while quarry is watching is marked `+` for eight seconds,
+in the blank column between the selection bar and the health dot, so nothing
+shifts. One that stops leaves no row to mark, so it is said once instead.
+
+`/` takes prefixes: `:3000` is a port, `@web` a kind, `~acme` a project, and
+anything else matches whatever it can. Several terms narrow together — `~acme
+@web` is this project's web servers.
+
+### Stopping and restarting
+
+`K` stops a service, `R` restarts it, `X` kills it outright. On a group
+heading they act on everything in it, one at a time — a worktree is a unit
+people think in, and doing it a row at a time is four confirmations for one
+intention. Each one asks first, and the prompt says what it is actually about
+to do, because that differs by what owns the service:
+
+- **A container** is stopped and restarted through the daemon it was found on
+  — by API, on that socket, not through whichever daemon `docker` on `PATH`
+  points at. A published port is held by the runtime's forwarder rather than
+  by the container, so signalling the pid quarry can see would leave the
+  container running with a broken port, and on some runtimes that pid belongs
+  to the daemon itself.
+- **A process** gets SIGTERM. To restart one, quarry reads its arguments,
+  its working directory and its environment first — if it cannot read all
+  three it says so and stops, rather than shutting down something it cannot
+  start again. Once the process has exited it watches the port for a couple of
+  seconds: most dev servers are already supervised by `npm run dev` or
+  `nodemon`, and if something else brings the service back, quarry leaves it
+  alone instead of starting a second copy. Otherwise it runs the command
+  again, detached, with its output appended to
+  `~/.local/state/quarry/<command>.log`.
 
 ## How it works
 

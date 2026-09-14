@@ -8,7 +8,8 @@ use ratatui::layout::Rect;
 
 use crate::diag;
 use crate::keys::{Command, Keymap};
-use crate::model::{GroupSource, Health, Rules, Server};
+use crate::lifecycle::{Op, Target};
+use crate::model::{GroupSource, Health, Query, Rules, Scope, Server};
 use crate::signature::{Evidence, Registry};
 use crate::theme::Theme;
 
@@ -34,10 +35,15 @@ pub enum Action {
     Open(String),
     /// Put text on the system clipboard.
     Copy(String),
-    /// Signal a process. Only ever produced after an explicit confirmation.
-    Signal {
-        pid: u32,
-        force: bool,
+    /// Stop, restart or kill a service. Only ever produced after an explicit
+    /// confirmation, and always carried out on a worker: a stop waits on a
+    /// grace period, and the UI must not wait with it.
+    Lifecycle {
+        /// More than one when a whole group was selected. A worktree is a unit
+        /// people think in — "restart this branch" — and doing it one row at a
+        /// time is four confirmations for one intention.
+        targets: Vec<Target>,
+        op: Op,
     },
 }
 
@@ -71,9 +77,9 @@ pub struct Confirm {
     pub action: PendingAction,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub enum PendingAction {
-    Kill { pid: u32, force: bool },
+    Lifecycle { targets: Vec<Target>, op: Op },
 }
 
 pub struct App {
@@ -93,7 +99,16 @@ pub struct App {
     pub collapsed: HashSet<String>,
     pub search: String,
     pub searching: bool,
+    /// Whether the detail pane is on screen. The list is what you read; the
+    /// detail is what you look up, so it can get out of the way.
+    pub detail: bool,
     pub show_all: bool,
+    /// The repository quarry was started in, if it was started in one. Found
+    /// once: the working directory cannot change while it runs.
+    pub scope: Option<Scope>,
+    /// Whether that scope is being applied. Separate from `scope` so the key
+    /// that turns it off can turn it back on without another look at the disk.
+    pub here: bool,
     pub help: bool,
     pub mouse: bool,
     pub scanning: bool,
@@ -149,7 +164,10 @@ impl App {
             collapsed: HashSet::new(),
             search: String::new(),
             searching: false,
+            detail: true,
             show_all: false,
+            scope: None,
+            here: false,
             help: false,
             mouse: true,
             scanning: true,
@@ -176,14 +194,48 @@ impl App {
 
         // Carry health forward so rows do not blink back to "checking" on every
         // refresh; the probe results for the new scan overwrite it shortly.
+        //
+        // The same walk answers what changed. quarry rescans every few seconds
+        // and has always known exactly what appeared and vanished; saying so is
+        // the difference between a tool you run and one you leave open.
+        let watching = self.last_scan.is_some();
+        let now = Instant::now();
         for s in fresh.iter_mut() {
-            if let Some(prev) = self
+            match self
                 .servers
                 .iter()
                 .find(|p| p.pid == s.pid && p.primary_port() == s.primary_port())
             {
-                s.health = prev.health.clone();
+                Some(prev) => {
+                    s.health = prev.health.clone();
+                    s.appeared = prev.appeared;
+                }
+                // The first scan is not news. Marking every service on the
+                // machine as new would be true and useless.
+                None => s.appeared = watching.then_some(now),
             }
+        }
+
+        let gone: Vec<String> = self
+            .servers
+            .iter()
+            .filter(|p| {
+                !fresh
+                    .iter()
+                    .any(|s| s.pid == p.pid && s.primary_port() == p.primary_port())
+            })
+            .map(|p| format!("{} {}", p.title(), p.primary_label()))
+            .collect();
+        if watching && !gone.is_empty() {
+            // A departure leaves no row to mark, so it has to be said once
+            // rather than shown. Two names and a count, because a toast
+            // listing nine services is a toast nobody finishes reading.
+            let text = match gone.len() {
+                1 => format!("{} stopped", gone[0]),
+                2 => format!("{} and {} stopped", gone[0], gone[1]),
+                n => format!("{}, {} and {} more stopped", gone[0], gone[1], n - 2),
+            };
+            self.toast(text, ToastKind::Info);
         }
 
         self.by_pid.clear();
@@ -346,7 +398,15 @@ impl App {
         }
     }
 
-    fn visible(&self, s: &Server, needle: &str) -> bool {
+    fn visible(&self, s: &Server, query: &Query) -> bool {
+        // Narrowing to a project is one more filter, not a different mode.
+        // `-a` has to keep meaning what it means everywhere else, or a repo
+        // with a couple of unix sockets in it looks like it has servers.
+        if let Some(scope) = self.scoped()
+            && !s.in_scope(scope)
+        {
+            return false;
+        }
         if !self.show_all && s.kind.is_background_noise() {
             return false;
         }
@@ -356,7 +416,7 @@ impl App {
         if !self.show_all && s.is_socket_only() {
             return false;
         }
-        if !needle.is_empty() && !s.matches(needle) {
+        if !query.is_empty() && !s.satisfies(query) {
             return false;
         }
         true
@@ -366,21 +426,48 @@ impl App {
         // Group keys are derived from the repo, the directory and the kind, and
         // each derivation allocates. Computing them once and sorting on the
         // result turns O(n log n) allocations into O(n).
-        let keys: Vec<String> = self.servers.iter().map(|s| s.group_key()).collect();
+        // Inside one repository every service shares a project, so grouping
+        // by project would produce a single heap. The branch is what tells two
+        // of them apart, and it is what a person calls a worktree.
+        let scoped = self.scoped().is_some();
+        let keys: Vec<String> = self
+            .servers
+            .iter()
+            .map(|s| {
+                if scoped {
+                    s.worktree_key()
+                } else {
+                    s.group_key()
+                }
+            })
+            .collect();
         let ranks: Vec<u8> = self
             .servers
             .iter()
             .map(|s| s.group_source().rank())
             .collect();
 
-        // Lowercased once here rather than once per service per keystroke.
-        let needle = self.search.to_lowercase();
+        // Parsed once here rather than once per service per keystroke.
+        let query = Query::parse(&self.search);
         let mut indices: Vec<usize> = (0..self.servers.len())
-            .filter(|i| self.visible(&self.servers[*i], &needle))
+            .filter(|i| self.visible(&self.servers[*i], &query))
             .collect();
+
+        // A group holding something broken sorts first. The one row that needs
+        // attention was reliably the hardest to reach: unattributed services
+        // sort last by rank, and a stray broken container is exactly the kind
+        // of thing that has no project.
+        let mut troubled: std::collections::HashSet<&str> = Default::default();
+        for i in &indices {
+            if self.servers[*i].health.is_trouble() {
+                troubled.insert(keys[*i].as_str());
+            }
+        }
+        let calm = |i: usize| !troubled.contains(keys[i].as_str());
         indices.sort_by(|a, b| {
-            ranks[*a]
-                .cmp(&ranks[*b])
+            calm(*a)
+                .cmp(&calm(*b))
+                .then_with(|| ranks[*a].cmp(&ranks[*b]))
                 .then_with(|| keys[*a].cmp(&keys[*b]))
                 .then_with(|| {
                     self.servers[*a]
@@ -408,8 +495,17 @@ impl App {
                 self.groups.push(Group {
                     key: keys[i].clone(),
                     source: self.servers[i].group_source(),
-                    branch: repo.as_ref().and_then(|r| r.branch.clone()),
-                    remote: repo.as_ref().and_then(|r| r.remote.clone()),
+                    // Scoped, the key is already the branch and the remote is
+                    // the same for every group. Printing either again would be
+                    // noise on every row.
+                    branch: repo
+                        .as_ref()
+                        .and_then(|r| r.branch.clone())
+                        .filter(|_| !scoped),
+                    remote: repo
+                        .as_ref()
+                        .and_then(|r| r.remote.clone())
+                        .filter(|_| !scoped),
                     count: 0,
                     trouble: 0,
                 });
@@ -594,19 +690,165 @@ impl App {
         }
     }
 
-    pub fn ask_kill(&mut self, force: bool) {
+    /// Move to the next service that is not answering, wrapping around.
+    ///
+    /// A collapsed group is expanded to get there. The alternative is a key
+    /// that reports trouble it will not show you.
+    pub fn jump_to_trouble(&mut self, forward: bool) {
+        if !self.servers.iter().any(|s| s.health.is_trouble()) {
+            self.toast("everything is answering".to_string(), ToastKind::Good);
+            return;
+        }
+        let hidden: Vec<String> = self
+            .groups
+            .iter()
+            .filter(|g| g.trouble > 0 && self.collapsed.contains(&g.key))
+            .map(|g| g.key.clone())
+            .collect();
+        if !hidden.is_empty() {
+            for key in hidden {
+                self.collapsed.remove(&key);
+            }
+            self.rebuild();
+        }
+
+        let n = self.rows.len();
+        let broken = |row: &Row| match row {
+            Row::Server(i) => self.servers[*i].health.is_trouble(),
+            Row::Group(_) => false,
+        };
+        // From the row after this one, so repeated presses walk the list
+        // rather than sticking on whatever is already selected.
+        let found = (1..=n).find_map(|step| {
+            let i = if forward {
+                (self.selected + step) % n
+            } else {
+                (self.selected + n - step % n) % n
+            };
+            broken(&self.rows[i]).then_some(i)
+        });
+        if let Some(i) = found {
+            // The renderer follows the selection; nothing to scroll here.
+            self.selected = i;
+        }
+    }
+
+    /// The scope, if one was found *and* is being applied.
+    pub fn scoped(&self) -> Option<&Scope> {
+        self.here.then_some(self.scope.as_ref()).flatten()
+    }
+
+    /// Turn the repository scope on or off. Asking to narrow to a project
+    /// while standing outside one has to fail visibly, or the screen simply
+    /// does not change and nothing explains why.
+    pub fn toggle_here(&mut self) {
+        match &self.scope {
+            None => self.toast(
+                "not in a git repository — nothing to narrow to".to_string(),
+                ToastKind::Bad,
+            ),
+            Some(scope) => {
+                let label = scope.label();
+                self.here = !self.here;
+                let text = if self.here {
+                    format!("showing {label} only")
+                } else {
+                    "showing every project".to_string()
+                };
+                self.toast(text, ToastKind::Info);
+                self.rebuild();
+            }
+        }
+    }
+
+    /// Raise the confirmation for stopping, restarting or killing what is
+    /// selected.
+    ///
+    /// The prompt names what will actually happen rather than what was pressed.
+    /// "Restart" means two different things depending on whether a daemon or
+    /// the kernel owns the service, and a confirmation that hides the
+    /// difference is not a confirmation.
+    pub fn ask(&mut self, op: Op) {
+        let verb = match op {
+            Op::Stop => "Stop",
+            Op::Restart => "Restart",
+            Op::Kill => "Force kill",
+        };
+        // A group heading is a selection too, and a worktree is a unit people
+        // think in: "restart this branch" rather than four rows in turn.
+        if let Some(group) = self.selected_group() {
+            let key = group.key.clone();
+            let members = self.servers_in(&key);
+            let n = members.len();
+            if n == 0 {
+                return;
+            }
+            let targets: Vec<Target> = members.iter().map(|s| s.lifecycle()).collect();
+            let containers = targets
+                .iter()
+                .filter(|t| matches!(t, Target::Container(_)))
+                .count();
+            // What is about to happen differs by who owns each service, and
+            // with several at once the honest summary is the split.
+            let detail = match (containers, n - containers) {
+                (0, _) => format!("{}, one at a time", plural(n, "process", "processes")),
+                (_, 0) => format!(
+                    "{}, through their runtime",
+                    plural(n, "container", "containers")
+                ),
+                (c, p) => format!(
+                    "{} and {}, one at a time",
+                    plural(c, "container", "containers"),
+                    plural(p, "process", "processes")
+                ),
+            };
+            self.confirm = Some(Confirm {
+                prompt: format!("{verb} all of {key}?"),
+                detail,
+                action: PendingAction::Lifecycle { targets, op },
+            });
+            return;
+        }
+
         let Some(s) = self.selected_server() else {
             return;
         };
+        let target = s.lifecycle();
+        let prompt = format!("{verb} {}?", s.title());
+        // ":8000" rather than the bare "8000" the list column shows — in a
+        // sentence the colon is what makes it read as a port.
+        let at = match s.primary() {
+            Some(l) if l.is_unix() => l.label(),
+            Some(l) => format!(":{}", l.port),
+            None => "no listener".to_string(),
+        };
+        let detail = match (&target, op) {
+            (Target::Container(c), Op::Stop) => {
+                format!("the runtime stops {} · {at}", c.display_name())
+            }
+            (Target::Container(c), Op::Restart) => {
+                format!("the runtime restarts {} · {at}", c.display_name())
+            }
+            (Target::Container(c), Op::Kill) => {
+                format!("the runtime kills {} · no grace period", c.display_name())
+            }
+            (Target::Process { pid, .. }, Op::Stop) => {
+                format!("SIGTERM {pid} · {} on {at}", s.command)
+            }
+            (Target::Process { pid, .. }, Op::Restart) => {
+                format!("SIGTERM {pid}, then start it again · {at}")
+            }
+            (Target::Process { pid, .. }, Op::Kill) => {
+                format!("SIGKILL {pid}, no clean shutdown · {at}")
+            }
+        };
         self.confirm = Some(Confirm {
-            prompt: format!(
-                "{} {} (pid {})?",
-                if force { "Force kill" } else { "Stop" },
-                s.title(),
-                s.pid
-            ),
-            detail: format!("{} on :{}", s.command, s.primary_port()),
-            action: PendingAction::Kill { pid: s.pid, force },
+            prompt,
+            detail,
+            action: PendingAction::Lifecycle {
+                targets: vec![target],
+                op,
+            },
         });
     }
 
@@ -618,7 +860,7 @@ impl App {
             return Action::None;
         }
         match c.action {
-            PendingAction::Kill { pid, force } => Action::Signal { pid, force },
+            PendingAction::Lifecycle { targets, op } => Action::Lifecycle { targets, op },
         }
     }
 
@@ -708,8 +950,13 @@ impl App {
                 return Action::Refresh;
             }
             Command::Reload => return Action::Reload,
-            Command::Stop => self.ask_kill(false),
-            Command::ForceKill => self.ask_kill(true),
+            Command::ToggleHere => self.toggle_here(),
+            Command::ToggleDetail => self.detail = !self.detail,
+            Command::NextTrouble => self.jump_to_trouble(true),
+            Command::PrevTrouble => self.jump_to_trouble(false),
+            Command::Stop => self.ask(Op::Stop),
+            Command::Restart => self.ask(Op::Restart),
+            Command::ForceKill => self.ask(Op::Kill),
             Command::Diagnostics => self.diagnostics = true,
             Command::Help => self.help = true,
             Command::ToggleMouse => {
@@ -783,11 +1030,11 @@ impl App {
             }
         }
         let counted: usize = self.groups.iter().map(|g| g.count).sum();
-        let needle = self.search.to_lowercase();
+        let query = Query::parse(&self.search);
         let visible = self
             .servers
             .iter()
-            .filter(|s| self.visible(s, &needle))
+            .filter(|s| self.visible(s, &query))
             .count();
         if counted != visible {
             return Err(format!(
@@ -803,4 +1050,9 @@ fn unix_seconds() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+/// `1 container`, `3 containers`.
+fn plural(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
 }

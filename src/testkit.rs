@@ -92,6 +92,7 @@ pub fn server(port: u16, command: &str) -> ServerBuilder {
             evidence: Vec::new(),
             container: None,
             started_at: 1_700_000_000,
+            appeared: None,
             cpu: 0.5,
             mem: 64 * 1024 * 1024,
             health: Health::Unknown,
@@ -104,10 +105,26 @@ impl ServerBuilder {
         self.server.repo = Some(Repo {
             name: name.to_string(),
             root: PathBuf::from(format!("/src/{name}")),
+            main_root: PathBuf::from(format!("/src/{name}")),
             branch: Some(branch.to_string()),
             remote: Some(format!("acme/{name}")),
         });
         self.server.cwd = Some(PathBuf::from(format!("/src/{name}")));
+        self
+    }
+
+    /// A linked worktree of `name`: a different checkout, on a different
+    /// branch, belonging to the same repository.
+    pub fn worktree(mut self, name: &str, branch: &str) -> Self {
+        let root = PathBuf::from(format!("/src/.worktrees/{name}/{branch}"));
+        self.server.repo = Some(Repo {
+            name: name.to_string(),
+            root: root.clone(),
+            main_root: PathBuf::from(format!("/src/{name}")),
+            branch: Some(branch.to_string()),
+            remote: Some(format!("acme/{name}")),
+        });
+        self.server.cwd = Some(root);
         self
     }
 
@@ -267,6 +284,8 @@ pub fn demo() -> Vec<Server> {
             .health(health)
             .build();
         s.container = Some(crate::docker::Container {
+            id: format!("{:0>64}", format!("{name}1d")),
+            socket: "/var/run/docker.sock".into(),
             name: format!("harbour-{name}-1"),
             image: if name == "db" {
                 "postgres:16".into()

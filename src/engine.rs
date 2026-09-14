@@ -284,6 +284,7 @@ impl Engine {
                     .unwrap_or_default(),
                 container,
                 started_at: i.started_at,
+                appeared: None,
                 cpu: i.cpu,
                 mem: i.mem,
                 health: Default::default(),

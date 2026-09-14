@@ -294,8 +294,9 @@ banner_ms = {banner_ms}
 # 3000 = "/healthz"
 
 # Keys, bound to action names. See `quarry --help` for the defaults.
-# Actions: quit refresh open copy filter toggle-all toggle-group stop
-#          force-kill diagnostics help toggle-mouse reload back
+# Actions: quit refresh open copy filter toggle-all toggle-here toggle-group
+#          toggle-detail next-trouble prev-trouble stop restart force-kill
+#          diagnostics help toggle-mouse reload back
 #          down up page-down page-up first last
 [keys]
 # "ctrl-r" = "reload"
@@ -463,6 +464,28 @@ mod tests {
         c.keys.insert("ctrl-r".into(), "reload".into());
         let back = Config::parse(&c.to_toml(), "roundtrip");
         assert_eq!(back, c, "`quarry config` output must load again");
+    }
+
+    #[test]
+    /// The list of actions in the written file is a hand-typed comment, and a
+    /// new command is easy to add to the keymap and forget here. A binding a
+    /// user cannot discover may as well not exist.
+    fn every_action_is_named_in_the_written_config() {
+        let text = Config::commented_default();
+        let actions = text
+            .lines()
+            .skip_while(|l| !l.starts_with("# Actions:"))
+            .take_while(|l| l.starts_with('#'))
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(!actions.is_empty(), "no action list in the written config");
+        for command in crate::keys::Command::ALL {
+            assert!(
+                actions.split_whitespace().any(|w| w == command.name()),
+                "{} is bindable but not listed in the written config",
+                command.name()
+            );
+        }
     }
 
     #[test]
