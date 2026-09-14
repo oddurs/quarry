@@ -830,18 +830,12 @@ fn draw_status(f2: &mut Frame, app: &App, t: &Theme, area: Rect) {
         return;
     }
 
-    // Drop whole hints that will not fit rather than letting the last one be
-    // sliced through the middle of a word.
+    // Which hints fit is decided by the keymap, which knows which of them
+    // matter; the leading space is this renderer's, so it comes off the room.
     let mut spans = vec![Span::raw(" ")];
-    let mut used = 1usize;
-    let room = area.width as usize;
-    for (i, (key, label)) in app.keymap.footer_hints().into_iter().enumerate() {
-        let gap = if i > 0 { 2 } else { 0 };
-        if used + gap + key.chars().count() + 1 + label.chars().count() > room {
-            break;
-        }
-        used += gap + key.chars().count() + 1 + label.chars().count();
-        if gap > 0 {
+    let room = area.width.saturating_sub(1) as usize;
+    for (i, (key, label)) in app.keymap.footer_hints(room).into_iter().enumerate() {
+        if i > 0 {
             spans.push(Span::raw("  "));
         }
         spans.push(Span::styled(key, Style::default().fg(t.accent).bold()));
@@ -973,15 +967,22 @@ fn draw_diagnostics(f: &mut Frame, app: &App, t: &Theme, area: Rect) {
 fn draw_confirm(f: &mut Frame, app: &App, t: &Theme, area: Rect) {
     let Some(c) = &app.confirm else { return };
     let popup = centered(area, 56.min(area.width.saturating_sub(4)), 7);
+    // Two borders and the indent. Without this a long command line runs
+    // straight through the right-hand border, and the box the user is being
+    // asked to answer looks broken.
+    let room = popup.width.saturating_sub(4) as usize;
     let lines = vec![
         Line::from(""),
         Line::from(vec![
             Span::raw("  "),
-            Span::styled(c.prompt.clone(), Style::default().fg(t.text).bold()),
+            Span::styled(
+                truncate(&c.prompt, room),
+                Style::default().fg(t.text).bold(),
+            ),
         ]),
         Line::from(vec![
             Span::raw("  "),
-            Span::styled(c.detail.clone(), Style::default().fg(t.faint)),
+            Span::styled(truncate(&c.detail, room), Style::default().fg(t.faint)),
         ]),
         Line::from(""),
         Line::from(vec![

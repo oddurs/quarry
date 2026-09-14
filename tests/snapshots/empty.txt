@@ -15,4 +15,4 @@
 │                                                  ││                                              │
 │                                                  ││                                              │
 ╰──────────────────────────────────────────────────╯╰──────────────────────────────────────────────╯
- ↑↓ move  ↵ open  y copy  / filter  a all  . here  K stop  r refresh  ? help
+ ↑↓ move  ↵ open  y copy  / filter  a all  . here  K stop  R restart  r refresh  ? help

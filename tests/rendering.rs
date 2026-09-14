@@ -234,7 +234,7 @@ fn help_overlay() {
 #[test]
 fn confirm_overlay() {
     let mut app = loaded();
-    app.ask_kill(false);
+    app.ask(quarry::lifecycle::Op::Stop);
     assert_snapshot("confirm", &ui::render_to_string(&mut app, 100, 20, 0));
 }
 

@@ -505,6 +505,22 @@ impl Server {
         self.listeners.first()
     }
 
+    /// Who to talk to in order to stop or restart this.
+    ///
+    /// The container where there is one. A published port is held by the
+    /// runtime's forwarder, not by the container, so the pid quarry can see is
+    /// the wrong thing to signal — at best it breaks the forward and leaves
+    /// the container running, at worst it is part of the daemon.
+    pub fn lifecycle(&self) -> crate::lifecycle::Target {
+        match &self.container {
+            Some(c) => crate::lifecycle::Target::Container(Box::new(c.clone())),
+            None => crate::lifecycle::Target::Process {
+                pid: self.pid,
+                port: self.listeners.iter().find(|l| !l.is_unix()).map(|l| l.port),
+            },
+        }
+    }
+
     pub fn primary_port(&self) -> u16 {
         self.listeners.first().map(|l| l.port).unwrap_or(0)
     }

@@ -17,4 +17,4 @@
 │                               ││                             │
 │                               ││ REPOSITORY                  │
 ╰───────────────────────────────╯╰─────────────────────────────╯
- ↑↓ move  ↵ open  y copy  / filter  a all  . here  K stop
+ ↑↓ move  ↵ open  y copy  / filter  a all  r refresh  ? help

@@ -1,19 +1,19 @@
  quarry  5 listening · 2 projects · 2 unhealthy                                    updated just now
-────────────────────────────────────────────────────────────────────────────────────────────────────
-╭ Services ─────╭ Keys ────────────────────────────────────────────────────────────╮───────────────╮
-│ ▾ acme-api  fe│                                                                  │               │
-│▌ ●  8000 pytho│  ↑/k, ↓/j      move between services                             │18000          │
-│ ▾ acme-web  ma│  home/g, end/G jump to the first or last                         │               │
-│  ●  3000 next-│  space/←/→     collapse or expand a project                      │               │
-│  ▲  3001 node │  ↵/o           open the URL in your browser                      │               │
-│ ▾ no project  │  y             copy the URL to the clipboard                     │               │
-│  ●  5432 postg│  /             filter by project, port, process or kind          │               │
-│  ✕  6379 redis│  esc           back out — clear the filter, close an overlay     │               │
-│               │  a             show system services too                          │               │
+────────────────╭ Keys ────────────────────────────────────────────────────────────╮────────────────
+╭ Services ─────│                                                                  │───────────────╮
+│ ▾ acme-api  fe│  ↑/k, ↓/j      move between services                             │               │
+│▌ ●  8000 pytho│  home/g, end/G jump to the first or last                         │18000          │
+│ ▾ acme-web  ma│  space/←/→     collapse or expand a project                      │               │
+│  ●  3000 next-│  ↵/o           open the URL in your browser                      │               │
+│  ▲  3001 node │  y             copy the URL to the clipboard                     │               │
+│ ▾ no project  │  /             filter by project, port, process or kind          │               │
+│  ●  5432 postg│  esc           back out — clear the filter, close an overlay     │               │
+│  ✕  6379 redis│  a             show system services too                          │               │
 │               │  .             narrow to the repository you are in               │               │
 │               │  r             rescan now                                        │               │
 │               │  ctrl-r        reload the config and theme                       │               │
-│               │  K             stop the process — SIGTERM, with a confirm        │               │
+│               │  K             stop it — SIGTERM, or the container's daemon      │               │
+│               │  R             restart it — stop, then start it again            │               │
 │               │  X             force kill — SIGKILL, with a confirm              │               │
 │               │  d             diagnostics — what failed, and why                │               │
 │               │  m             mouse capture — off restores text selection       │               │
@@ -23,4 +23,4 @@
 │               │                                                                  │               │
 │               ╰──────────────────────────────────────────────────────────────────╯               │
 ╰──────────────────────────────────────────────────╯╰──────────────────────────────────────────────╯
- ↑↓ move  ↵ open  y copy  / filter  a all  . here  K stop  r refresh  ? help
+ ↑↓ move  ↵ open  y copy  / filter  a all  . here  K stop  R restart  r refresh  ? help

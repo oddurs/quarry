@@ -32,6 +32,7 @@ pub enum Command {
     Refresh,
     Reload,
     Stop,
+    Restart,
     ForceKill,
     Diagnostics,
     Help,
@@ -40,7 +41,10 @@ pub enum Command {
 }
 
 impl Command {
-    pub const ALL: [Command; 21] = [
+    /// A slice rather than a sized array: the length is not information,
+    /// and a hand-kept count is one more thing to get wrong when a command is
+    /// added.
+    pub const ALL: &'static [Command] = &[
         Command::Down,
         Command::Up,
         Command::PageDown,
@@ -57,6 +61,7 @@ impl Command {
         Command::Refresh,
         Command::Reload,
         Command::Stop,
+        Command::Restart,
         Command::ForceKill,
         Command::Diagnostics,
         Command::Help,
@@ -84,6 +89,7 @@ impl Command {
             Command::Refresh => "refresh",
             Command::Reload => "reload",
             Command::Stop => "stop",
+            Command::Restart => "restart",
             Command::ForceKill => "force-kill",
             Command::Diagnostics => "diagnostics",
             Command::Help => "help",
@@ -94,7 +100,7 @@ impl Command {
 
     pub fn from_name(name: &str) -> Option<Command> {
         let name = name.trim().to_lowercase();
-        Command::ALL.into_iter().find(|c| c.name() == name)
+        Command::ALL.iter().copied().find(|c| c.name() == name)
     }
 
     pub fn describe(self) -> &'static str {
@@ -114,7 +120,8 @@ impl Command {
             Command::ToggleHere => "narrow to the repository you are in",
             Command::Refresh => "rescan now",
             Command::Reload => "reload the config and theme",
-            Command::Stop => "stop the process — SIGTERM, with a confirm",
+            Command::Stop => "stop it — SIGTERM, or the container's daemon",
+            Command::Restart => "restart it — stop, then start it again",
             Command::ForceKill => "force kill — SIGKILL, with a confirm",
             Command::Diagnostics => "diagnostics — what failed, and why",
             Command::Help => "this help",
@@ -124,8 +131,8 @@ impl Command {
     }
 
     /// Rows shown in the help overlay, in the order they appear.
-    pub fn help_order() -> [Command; 17] {
-        [
+    pub fn help_order() -> &'static [Command] {
+        &[
             Command::Down,
             Command::First,
             Command::ToggleGroup,
@@ -138,6 +145,7 @@ impl Command {
             Command::Refresh,
             Command::Reload,
             Command::Stop,
+            Command::Restart,
             Command::ForceKill,
             Command::Diagnostics,
             Command::ToggleMouse,
@@ -183,6 +191,7 @@ impl Default for Keymap {
                 (K::Char('r'), n, C::Refresh),
                 (K::Char('r'), ctrl, C::Reload),
                 (K::Char('K'), n, C::Stop),
+                (K::Char('R'), n, C::Restart),
                 (K::Char('X'), n, C::ForceKill),
                 (K::Char('d'), n, C::Diagnostics),
                 (K::Char('?'), n, C::Help),
@@ -303,7 +312,7 @@ impl Keymap {
     /// bindings rather than from a hardcoded list.
     pub fn help_rows(&self) -> Vec<(String, &'static str)> {
         let mut rows = Vec::new();
-        for command in Command::help_order() {
+        for &command in Command::help_order() {
             let keys = self.keys_for(command);
             if keys.is_empty() {
                 continue;
@@ -327,30 +336,57 @@ impl Keymap {
         rows
     }
 
-    /// The short hints along the bottom of the screen.
-    pub fn footer_hints(&self) -> Vec<(String, &'static str)> {
+    /// The short hints along the bottom of the screen, fitted to `room`
+    /// columns.
+    ///
+    /// Which hints survive a narrow terminal is a judgement, so it is made
+    /// here rather than by a renderer truncating the line. Dropping from the
+    /// right would cost `? help` and `r refresh` to keep `R restart`, which is
+    /// backwards: the rarer the action, the sooner its hint goes.
+    pub fn footer_hints(&self, room: usize) -> Vec<(String, &'static str)> {
+        // Listed in reading order; the number is how soon it goes, highest
+        // first. Movement never goes.
         let wanted = [
-            (Command::Down, "move"),
-            (Command::Open, "open"),
-            (Command::Copy, "copy"),
-            (Command::Filter, "filter"),
-            (Command::ToggleAll, "all"),
-            (Command::ToggleHere, "here"),
-            (Command::Stop, "stop"),
-            (Command::Refresh, "refresh"),
-            (Command::Help, "help"),
+            (Command::Down, "move", 0),
+            (Command::Open, "open", 1),
+            (Command::Copy, "copy", 4),
+            (Command::Filter, "filter", 3),
+            (Command::ToggleAll, "all", 6),
+            (Command::ToggleHere, "here", 7),
+            (Command::Stop, "stop", 8),
+            (Command::Restart, "restart", 9),
+            (Command::Refresh, "refresh", 5),
+            (Command::Help, "help", 2),
         ];
-        wanted
+        let mut hints: Vec<(String, &'static str, u8)> = wanted
             .into_iter()
-            .filter_map(|(command, label)| {
+            .filter_map(|(command, label, rank)| {
                 let key = if command == Command::Down {
                     Some("↑↓".to_string())
                 } else {
                     self.keys_for(command).into_iter().next()
                 };
-                key.map(|k| (k, label))
+                key.map(|k| (k, label, rank))
             })
-            .collect()
+            .collect();
+
+        let width = |hints: &[(String, &str, u8)]| {
+            hints
+                .iter()
+                .map(|(k, l, _)| k.chars().count() + 1 + l.chars().count())
+                .sum::<usize>()
+                + hints.len().saturating_sub(1) * 2
+        };
+        while width(&hints) > room && hints.len() > 1 {
+            let worst = hints
+                .iter()
+                .enumerate()
+                .max_by_key(|(_, (_, _, rank))| *rank)
+                .map(|(i, _)| i)
+                .expect("not empty");
+            hints.remove(worst);
+        }
+        hints.into_iter().map(|(k, l, _)| (k, l)).collect()
     }
 }
 
@@ -489,7 +525,7 @@ mod tests {
     #[test]
     fn the_defaults_cover_every_command() {
         let map = Keymap::default();
-        for command in Command::ALL {
+        for &command in Command::ALL {
             assert!(
                 !map.keys_for(command).is_empty(),
                 "{} has no default key",
@@ -500,7 +536,7 @@ mod tests {
 
     #[test]
     fn every_command_name_round_trips() {
-        for command in Command::ALL {
+        for &command in Command::ALL {
             assert_eq!(Command::from_name(command.name()), Some(command));
         }
         assert_eq!(Command::from_name("not-an-action"), None);
