@@ -358,3 +358,21 @@ fn custom_classification_rules_reach_the_output() {
         assert_eq!(kind, "queue", "a user rule did not win: {line:?}");
     }
 }
+
+/// `--here` outside a repository has no answer. Falling back to the whole
+/// machine would look like a working `--here` in a project with an improbable
+/// number of servers.
+#[test]
+fn here_outside_a_repository_fails_loudly() {
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_quarry"))
+        .args(["-p", "--here"])
+        // `/` is the one directory on any machine that is certainly not a
+        // checkout of anything.
+        .current_dir("/")
+        .output()
+        .expect("run quarry");
+    assert!(!out.status.success(), "exited zero with nothing to show");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("--here"), "{err}");
+    assert!(err.contains("git repository"), "{err}");
+}

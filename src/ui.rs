@@ -18,6 +18,13 @@ use crate::theme::Theme;
 
 const SPINNER: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
 
+/// What the detail pane needs: two borders, an indent, and the longest line it
+/// holds — a path, or `usage   0.5% cpu · 64 MB rss`.
+const DETAIL_WIDTH: u16 = 46;
+
+/// Below this the list is not worth reading, so the detail pane gives way.
+const MIN_LIST: u16 = 44;
+
 pub fn draw(f: &mut Frame, app: &mut App, tick: usize) {
     // Cloned once per frame rather than borrowed, so the drawing code can keep
     // taking `&mut App` for hit-test bookkeeping.
@@ -36,14 +43,28 @@ pub fn draw(f: &mut Frame, app: &mut App, tick: usize) {
     draw_titlebar(f, app, &t, chunks[0], tick);
     draw_rule(f, &t, chunks[1]);
 
+    // A share of the width was the wrong model. The detail pane holds short
+    // key-value lines and needs about as much room whatever the terminal is;
+    // half of a wide one was waste, and half of a narrow one starved the list
+    // that was being read. So it takes a fixed width, the list takes the rest,
+    // and on a terminal too narrow to afford both it goes away.
+    let show_detail = app.detail && area.width >= DETAIL_WIDTH + MIN_LIST;
     let split = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(52), Constraint::Percentage(48)])
+        .constraints(if show_detail {
+            [Constraint::Min(MIN_LIST), Constraint::Length(DETAIL_WIDTH)]
+        } else {
+            [Constraint::Percentage(100), Constraint::Length(0)]
+        })
         .split(chunks[2]);
 
     app.list_area = split[0];
     draw_list(f, app, &t, split[0]);
-    draw_detail(f, app, &t, split[1]);
+    if show_detail {
+        draw_detail(f, app, &t, split[1]);
+    } else {
+        app.url_hitbox = None;
+    }
     draw_status(f, app, &t, chunks[3]);
 
     if app.help {
@@ -76,20 +97,42 @@ fn draw_titlebar(f: &mut Frame, app: &App, t: &Theme, area: Rect, tick: usize) {
     let mut left = vec![
         Span::styled(" quarry", Style::default().fg(t.accent).bold()),
         Span::styled("  ", Style::default()),
-        Span::styled(format!("{services}"), Style::default().fg(t.text).bold()),
-        Span::styled(" listening", Style::default().fg(t.muted)),
     ];
+    // Scoped, the repository is the headline: it is the answer to "which
+    // project am I looking at", and without it the screen is indistinguishable
+    // from a machine that happens to be quiet.
+    if let Some(scope) = app.scoped() {
+        left.push(Span::styled(
+            scope.name.clone(),
+            Style::default().fg(t.text).bold(),
+        ));
+        if roomy && let Some(remote) = &scope.remote {
+            left.push(Span::styled(
+                format!(" {remote}"),
+                Style::default().fg(t.faint),
+            ));
+        }
+        left.push(Span::styled("  ", Style::default()));
+    }
+    left.push(Span::styled(
+        format!("{services}"),
+        Style::default().fg(t.text).bold(),
+    ));
+    left.push(Span::styled(" listening", Style::default().fg(t.muted)));
     if roomy {
         left.push(Span::styled(" · ", Style::default().fg(t.faint)));
         left.push(Span::styled(
             format!("{projects}"),
             Style::default().fg(t.text).bold(),
         ));
+        // Inside one repository the groups are its worktrees, so calling them
+        // projects would be a different claim than the screen is making.
         left.push(Span::styled(
-            if projects == 1 {
-                " project"
-            } else {
-                " projects"
+            match (app.scoped().is_some(), projects == 1) {
+                (true, true) => " worktree",
+                (true, false) => " worktrees",
+                (false, true) => " project",
+                (false, false) => " projects",
             },
             Style::default().fg(t.muted),
         ));
@@ -107,8 +150,15 @@ fn draw_titlebar(f: &mut Frame, app: &App, t: &Theme, area: Rect, tick: usize) {
     }
     if !app.search.is_empty() && roomy {
         left.push(Span::styled(" · ", Style::default().fg(t.faint)));
+        // With what it is hiding. "3 listening" beside a filter is ambiguous
+        // between a quiet machine and a narrow filter, and those two call for
+        // opposite reactions.
+        let hidden = app.servers.len().saturating_sub(services);
         left.push(Span::styled(
-            format!("filter “{}”", app.search),
+            match hidden {
+                0 => format!("“{}”", app.search),
+                n => format!("“{}” · {n} hidden", app.search),
+            },
             Style::default().fg(t.client_error),
         ));
     }
@@ -161,10 +211,22 @@ fn draw_list(f: &mut Frame, app: &mut App, t: &Theme, area: Rect) {
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(t.faint))
-        .title(Line::from(vec![Span::styled(
-            " Services ",
-            Style::default().fg(t.text).bold(),
-        )]));
+        .title(Line::from({
+            let mut title = vec![Span::styled(
+                " Services ",
+                Style::default().fg(t.text).bold(),
+            )];
+            // A mode you cannot see you are in is a bug report waiting to
+            // happen, and the pane's own title is where it belongs: beside the
+            // thing it rearranged, not in a status bar across the screen.
+            if let Some(how) = app.arrangement() {
+                title.push(Span::styled(
+                    format!("· {how} "),
+                    Style::default().fg(t.faint),
+                ));
+            }
+            title
+        }));
 
     if app.rows.is_empty() {
         let msg = if app.servers.is_empty() {
@@ -209,24 +271,57 @@ fn draw_list(f: &mut Frame, app: &mut App, t: &Theme, area: Rect) {
     let end = (app.offset + inner_height).min(app.rows.len());
     let window = &app.rows[app.offset.min(end)..end];
 
+    // Sized from every visible row rather than from the window, so the column
+    // does not change width as you scroll past a long socket name.
+    let label_width = app
+        .rows
+        .iter()
+        .filter_map(|r| match r {
+            Row::Server(i) => Some(app.servers[*i].primary_column().chars().count()),
+            Row::Group(_) => None,
+        })
+        .max()
+        .unwrap_or(PORT_WIDTH)
+        // A third of the row, but never less than a port: on a pane four
+        // columns wide the cap would otherwise fall below the floor, and
+        // `clamp` is entitled to panic when it does.
+        .clamp(
+            PORT_WIDTH,
+            LABEL_MAX.min(inner_width.min(ROW_MAX) / 3).max(PORT_WIDTH),
+        );
+
     let cursor = app.selected.saturating_sub(app.offset);
     let items: Vec<ListItem> = window
         .iter()
         .enumerate()
         .map(|(i, row)| {
             let selected = i == cursor;
+            // Capped for both, or a folded group's count would sit against the
+            // pane edge while the rows beneath it stopped short.
+            let row_width = inner_width.min(ROW_MAX);
             let line = match row {
-                Row::Group(g) => group_line(app, t, *g, inner_width, selected),
-                Row::Server(s) => server_line(&app.servers[*s], t, inner_width, selected),
+                Row::Group(g) => group_line(app, t, *g, row_width, selected),
+                Row::Server(s) => {
+                    server_line(&app.servers[*s], t, row_width, label_width, selected)
+                }
             };
+            // Never both: two highlights on one line is one too many, and the
+            // cursor is the one that has to win.
+            let fresh = !selected
+                && matches!(row, Row::Server(i) if is_fresh(&app.servers[*i]))
+                && t.tints_arrivals();
             // Reverse video inverts whatever colour it finds, so a row of many
             // colours becomes a bar striped in as many. Flattened first, it
             // becomes what every terminal list looks like: one solid block.
-            ListItem::new(if selected && t.selection_inverts() {
+            let item = ListItem::new(if selected && t.selection_inverts() {
                 flatten(line)
             } else {
                 line
-            })
+            });
+            match t.fresh().filter(|_| fresh) {
+                Some(style) => item.style(style),
+                None => item,
+            }
         })
         .collect();
 
@@ -286,11 +381,29 @@ fn gutter(selected: bool, t: &Theme) -> Span<'static> {
     }
 }
 
+/// The widest a row's content is allowed to get.
+///
+/// A row carries a port, a name, a kind and a status — around seventy columns
+/// of information. Stretched across a wide pane the name ends up on the far
+/// left and the status on the far right with nothing in between, and the eye
+/// has to cross the gap on every line. Past this, the pane gets a right margin
+/// instead.
+const ROW_MAX: usize = 72;
+
+/// Five digits, which is every port there is.
+const PORT_WIDTH: usize = 5;
+
+/// The widest the leftmost column may get when a unix socket is on screen.
+/// Enough of `local-27472-81dd8dbc70.ctrl.sock` to tell it from its neighbour,
+/// and not so much that it is the only thing on the line.
+const LABEL_MAX: usize = 18;
+
 fn group_line(app: &App, t: &Theme, idx: usize, width: usize, selected: bool) -> Line<'static> {
     let g = &app.groups[idx];
     let collapsed = app.collapsed.contains(&g.key);
     let name = match g.source {
-        GroupSource::Unattributed => "no project".to_string(),
+        GroupSource::Unattributed if g.describes_a_project => "no project".to_string(),
+        _ if !g.describes_a_project => g.key.clone(),
         GroupSource::System => "system services".to_string(),
         _ => g.key.clone(),
     };
@@ -356,9 +469,41 @@ fn group_line(app: &App, t: &Theme, idx: usize, width: usize, selected: bool) ->
     Line::from(spans)
 }
 
-fn server_line(s: &Server, t: &Theme, width: usize, selected: bool) -> Line<'static> {
+/// How long a newly-appeared service stays highlighted.
+///
+/// Measured from the other end: you start a server, watch it boot, and switch
+/// to quarry. That is ten or fifteen seconds on a slow one, so anything much
+/// shorter is a highlight you arrive too late to see.
+const FRESH: Duration = Duration::from_secs(30);
+
+/// Has this appeared recently enough to still be worth pointing at?
+fn is_fresh(s: &Server) -> bool {
+    s.appeared.is_some_and(|at| at.elapsed() < FRESH)
+}
+
+fn server_line(
+    s: &Server,
+    t: &Theme,
+    width: usize,
+    label_width: usize,
+    selected: bool,
+) -> Line<'static> {
     let (dot, dot_color) = (s.health.glyph(), t.health(&s.health));
-    let port = format!("{:>5}", s.primary_label());
+    // The column between the selection bar and the health dot was already a
+    // blank space, so marking an arrival costs no width and shifts nothing.
+    let fresh = if is_fresh(s) {
+        Span::styled("+", Style::default().fg(t.accent).bold())
+    } else {
+        Span::raw(" ")
+    };
+    // Right-aligned in a width the table chose, not one this value chose. A
+    // port is five digits; a unix socket's name is as long as someone felt
+    // like making it, and letting it size the column pushed the name, the kind
+    // and the status off their lines for every other row on screen.
+    let port = format!(
+        "{:>label_width$}",
+        truncate(&s.primary_column(), label_width)
+    );
     let extra_ports = if s.listeners.len() > 1 {
         format!(" +{}", s.listeners.len() - 1)
     } else {
@@ -368,13 +513,21 @@ fn server_line(s: &Server, t: &Theme, width: usize, selected: bool) -> Line<'sta
     let (status_full, status_color) = status_cell(&s.health, t);
     let status_short = status_abbrev(&s.health);
 
-    // "  " + dot + " " + port + extras, then one trailing space at the end.
-    let lead = 2 + 1 + 1 + port.chars().count() + extra_ports.chars().count() + 1;
+    // "  " + dot + " " + port, then one trailing space at the end. The count
+    // of further listeners is deliberately not here: it appears on one row in
+    // twenty, and in the lead it moved that row's name column out of line with
+    // every other row on screen. It is spent out of the name's budget instead.
+    let lead = 2 + 1 + 1 + port.chars().count() + 1;
     let avail = width.saturating_sub(lead + 1);
 
-    // Degrade in a defined order — badge first, then the latency, then the
-    // name — so a narrow terminal loses detail instead of losing its shape.
-    const MIN_NAME: usize = 4;
+    // The name is the row. Everything else is an attribute of it, so
+    // everything else goes first: the kind — which the colour and often the
+    // name already imply — then the latency. `Sync…storage` is not a row worth
+    // keeping a badge for.
+    const MIN_NAME: usize = 14;
+    // One space of it is the gap before whatever follows, so a name that fills
+    // its column does not run into the badge.
+    const GAP: usize = 1;
     let badge_cost = badge.chars().count() + 2;
     let (show_badge, status) = if avail >= badge_cost + status_full.chars().count() + MIN_NAME {
         (true, status_full.clone())
@@ -386,18 +539,25 @@ fn server_line(s: &Server, t: &Theme, width: usize, selected: bool) -> Line<'sta
 
     let reserved = status.chars().count() + if show_badge { badge_cost } else { 0 };
     let name_width = avail.saturating_sub(reserved);
-    let name = truncate(&s.service_name(), name_width);
-    let pad = name_width.saturating_sub(name.chars().count());
+    let name = truncate(
+        &s.service_name(),
+        name_width
+            .saturating_sub(GAP)
+            .saturating_sub(extra_ports.chars().count()),
+    );
+    let pad = name_width
+        .saturating_sub(name.chars().count())
+        .saturating_sub(extra_ports.chars().count());
 
     let mut spans = vec![
         gutter(selected, t),
-        Span::raw(" "),
+        fresh,
         Span::styled(dot, Style::default().fg(dot_color)),
         Span::raw(" "),
         Span::styled(port, Style::default().fg(t.text).bold()),
-        Span::styled(extra_ports, Style::default().fg(t.faint)),
         Span::raw(" "),
         Span::styled(name, Style::default().fg(t.text)),
+        Span::styled(extra_ports, Style::default().fg(t.faint)),
         Span::raw(" ".repeat(pad)),
     ];
     if show_badge {
@@ -435,7 +595,10 @@ fn status_cell(h: &Health, t: &Theme) -> (String, ratatui::style::Color) {
             };
             (format!("{status} {:>6}", crate::model::fmt_ms(*latency)), c)
         }
-        Health::Open { .. } => ("open      ".to_string(), t.open),
+        // The latency was measured; dropping it read as "not checked" rather
+        // than "checked, and not HTTP". Padded to the width of a status line
+        // so the column does not move.
+        Health::Open { latency } => (format!("open{:>6}", crate::model::fmt_ms(*latency)), t.open),
         Health::Bound => ("bound     ".to_string(), t.open),
         Health::Closed => ("no answer ".to_string(), t.server_error),
         Health::Unknown => ("···       ".to_string(), t.faint),
@@ -511,7 +674,16 @@ fn draw_detail(f: &mut Frame, app: &mut App, t: &Theme, area: Rect) {
         lines.push(Line::from(vec![
             Span::raw("  "),
             Span::styled(s.url(), Style::default().fg(t.secondary)),
-            Span::styled("  (copied, not opened)", Style::default().fg(t.faint)),
+        ]));
+        // On its own line. Beside a long URI it wrapped through the middle of
+        // the parenthesis, which looked like a rendering fault rather than a
+        // note about what enter will do.
+        lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled(
+                "enter copies this, it cannot be opened",
+                Style::default().fg(t.faint),
+            ),
         ]));
     }
     lines.push(Line::from(""));
@@ -702,7 +874,11 @@ fn group_detail(app: &App, group: &crate::app::Group, t: &Theme) -> Vec<Line<'st
         Line::from(""),
     ];
 
-    if group.branch.is_some() || group.remote.is_some() {
+    // The path earns the section on its own. Narrowed to one repository the
+    // group heading is already the branch, so the branch and remote are not
+    // repeated here — and where you would `cd` to is the thing left to say.
+    let root = members.first().and_then(|s| s.repo.as_ref());
+    if group.branch.is_some() || group.remote.is_some() || root.is_some() {
         lines.push(section("Repository", t));
         if let Some(branch) = &group.branch {
             lines.push(kv("branch", branch, t));
@@ -710,7 +886,7 @@ fn group_detail(app: &App, group: &crate::app::Group, t: &Theme) -> Vec<Line<'st
         if let Some(remote) = &group.remote {
             lines.push(kv("remote", remote, t));
         }
-        if let Some(root) = members.first().and_then(|s| s.repo.as_ref()) {
+        if let Some(root) = root {
             lines.push(kv("path", &tilde(&root.root.display().to_string()), t));
         }
         lines.push(Line::from(""));
@@ -766,7 +942,13 @@ fn draw_status(f2: &mut Frame, app: &App, t: &Theme, area: Rect) {
             Span::styled(app.search.clone(), Style::default().fg(t.text)),
             Span::styled("▏", Style::default().fg(t.accent)),
             Span::styled(
-                "   enter to keep · esc to clear",
+                // The syntax is worth teaching, and an empty box is the only
+                // moment it is not in the way.
+                if app.search.is_empty() {
+                    "   :port  @kind  ~project  or any words"
+                } else {
+                    "   enter to keep · esc to clear"
+                },
                 Style::default().fg(t.faint),
             ),
         ]);
@@ -804,18 +986,12 @@ fn draw_status(f2: &mut Frame, app: &App, t: &Theme, area: Rect) {
         return;
     }
 
-    // Drop whole hints that will not fit rather than letting the last one be
-    // sliced through the middle of a word.
+    // Which hints fit is decided by the keymap, which knows which of them
+    // matter; the leading space is this renderer's, so it comes off the room.
     let mut spans = vec![Span::raw(" ")];
-    let mut used = 1usize;
-    let room = area.width as usize;
-    for (i, (key, label)) in app.keymap.footer_hints().into_iter().enumerate() {
-        let gap = if i > 0 { 2 } else { 0 };
-        if used + gap + key.chars().count() + 1 + label.chars().count() > room {
-            break;
-        }
-        used += gap + key.chars().count() + 1 + label.chars().count();
-        if gap > 0 {
+    let room = area.width.saturating_sub(1) as usize;
+    for (i, (key, label)) in app.keymap.footer_hints(room).into_iter().enumerate() {
+        if i > 0 {
             spans.push(Span::raw("  "));
         }
         spans.push(Span::styled(key, Style::default().fg(t.accent).bold()));
@@ -947,15 +1123,22 @@ fn draw_diagnostics(f: &mut Frame, app: &App, t: &Theme, area: Rect) {
 fn draw_confirm(f: &mut Frame, app: &App, t: &Theme, area: Rect) {
     let Some(c) = &app.confirm else { return };
     let popup = centered(area, 56.min(area.width.saturating_sub(4)), 7);
+    // Two borders and the indent. Without this a long command line runs
+    // straight through the right-hand border, and the box the user is being
+    // asked to answer looks broken.
+    let room = popup.width.saturating_sub(4) as usize;
     let lines = vec![
         Line::from(""),
         Line::from(vec![
             Span::raw("  "),
-            Span::styled(c.prompt.clone(), Style::default().fg(t.text).bold()),
+            Span::styled(
+                truncate(&c.prompt, room),
+                Style::default().fg(t.text).bold(),
+            ),
         ]),
         Line::from(vec![
             Span::raw("  "),
-            Span::styled(c.detail.clone(), Style::default().fg(t.faint)),
+            Span::styled(truncate(&c.detail, room), Style::default().fg(t.faint)),
         ]),
         Line::from(""),
         Line::from(vec![
@@ -1068,25 +1251,40 @@ pub fn render_background_to_string(app: &mut App, width: u16, height: u16, tick:
 pub fn render_html(app: &mut App, width: u16, height: u16, tick: usize) -> String {
     let buf = render_frame(app, width, height, tick);
     let theme = app.theme.clone();
-    let mut out = String::from("<pre class=\"tui\" aria-label=\"quarry running in a terminal\">");
+    // The page's own ground, so the markup does not depend on whatever it is
+    // dropped into. A light theme rendered onto a dark page is not that theme.
+    let ground = css_colour(Some(theme.background), &theme);
+    let mut out = format!(
+        "<pre class=\"tui\" style=\"background:{ground}\" \
+         aria-label=\"quarry running in a terminal\">"
+    );
 
     for y in 0..buf.area.height {
-        let mut run: Option<(String, String)> = None; // (colour, text)
+        let mut run: Option<(Ink, String)> = None;
         for x in 0..buf.area.width {
             let cell = &buf[(x, y)];
-            let colour = css_colour(cell.style().fg, &theme);
+            let style = cell.style();
+            // Backgrounds are not decoration here: the selected row and a
+            // service that has just appeared are *only* a change of ground, so
+            // markup that carries the foreground alone shows neither of them.
+            let ink = Ink {
+                fg: css_colour(style.fg, &theme),
+                bg: (style.bg.unwrap_or(ratatui::style::Color::Reset)
+                    != ratatui::style::Color::Reset)
+                    .then(|| css_colour(style.bg, &theme)),
+            };
             let symbol = escape(cell.symbol());
             match &mut run {
-                Some((current, text)) if *current == colour => text.push_str(&symbol),
+                Some((current, text)) if *current == ink => text.push_str(&symbol),
                 Some((current, text)) => {
                     push_span(&mut out, current, text);
-                    run = Some((colour, symbol));
+                    run = Some((ink, symbol));
                 }
-                None => run = Some((colour, symbol)),
+                None => run = Some((ink, symbol)),
             }
         }
-        if let Some((colour, text)) = run.take() {
-            push_span(&mut out, &colour, &text);
+        if let Some((ink, text)) = run.take() {
+            push_span(&mut out, &ink, &text);
         }
         if y + 1 < buf.area.height {
             out.push('\n');
@@ -1096,13 +1294,27 @@ pub fn render_html(app: &mut App, width: u16, height: u16, tick: usize) -> Strin
     out
 }
 
-fn push_span(out: &mut String, colour: &str, text: &str) {
-    if text.trim().is_empty() {
-        // Blank runs need no colour, and leaving them bare keeps the markup
-        // roughly half the size.
-        out.push_str(text);
-    } else {
-        out.push_str(&format!("<span style=\"color:{colour}\">{text}</span>"));
+/// What a run of cells is painted with.
+#[derive(PartialEq, Eq)]
+struct Ink {
+    fg: String,
+    /// `None` for the page's own ground, which needs no markup.
+    bg: Option<String>,
+}
+
+fn push_span(out: &mut String, ink: &Ink, text: &str) {
+    match (&ink.bg, text.trim().is_empty()) {
+        // Blank runs on the page's own ground need no colour, and leaving them
+        // bare keeps the markup roughly half the size.
+        (None, true) => out.push_str(text),
+        (None, false) => out.push_str(&format!("<span style=\"color:{}\">{text}</span>", ink.fg)),
+        // A run on its own ground is kept whether or not it has glyphs in it: a
+        // highlight bar is mostly padding, and dropping the blanks would leave
+        // it in pieces.
+        (Some(bg), _) => out.push_str(&format!(
+            "<span style=\"color:{};background:{bg}\">{text}</span>",
+            ink.fg
+        )),
     }
 }
 

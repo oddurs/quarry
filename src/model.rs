@@ -3,8 +3,8 @@
 //! called `node` tells you nothing, but `node` on 5432 vs 5173 does.
 
 use std::net::IpAddr;
-use std::path::PathBuf;
-use std::time::Duration;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub enum Kind {
@@ -228,6 +228,23 @@ impl Listener {
         }
     }
 
+    /// What goes in a list column, where the width belongs to the table rather
+    /// than to this value.
+    ///
+    /// Always the socket's own name, never the path to it. `label` keeps the
+    /// directory while it fits, which is right in a detail pane and wrong in a
+    /// column: `/tmp/cc-socks/52425.sock` is twenty-four characters of which
+    /// five distinguish it from the next one.
+    pub fn column(&self) -> String {
+        match &self.path {
+            Some(path) => path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| path.to_string_lossy().to_string()),
+            None => self.port.to_string(),
+        }
+    }
+
     pub fn scope(&self) -> &'static str {
         match self.transport {
             Transport::Unix => "filesystem",
@@ -279,9 +296,208 @@ impl GroupSource {
 #[derive(Clone, Debug, Default)]
 pub struct Repo {
     pub name: String,
+    /// The work tree this process is running in. For a linked worktree that is
+    /// the worktree's own directory, not the repository's.
     pub root: PathBuf,
+    /// The main repository's root — the same path for every worktree of one
+    /// project, and equal to `root` when there are none.
+    ///
+    /// This, rather than the name, is what says two services belong to the
+    /// same project. Names are basenames and two unrelated checkouts called
+    /// `site` are not one repository.
+    pub main_root: PathBuf,
     pub branch: Option<String>,
     pub remote: Option<String>,
+}
+
+/// One project, seen from inside it.
+///
+/// quarry normally answers "what is running on this machine". Started with
+/// `--here` it answers a narrower question — "what is running for the project
+/// I am in" — which is the one you have while working. The answer spans more
+/// than the directory you are standing in: a linked worktree lives somewhere
+/// else entirely, and a Compose stack declared in the repository is part of
+/// the same project even though it runs in a container.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Scope {
+    /// The main repository root. Compared against [`Repo::main_root`], so
+    /// every worktree of this project is in scope and an unrelated checkout
+    /// with the same name is not.
+    pub root: PathBuf,
+    pub name: String,
+    pub remote: Option<String>,
+}
+
+impl Scope {
+    /// The repository containing `dir`, if it is in one.
+    pub fn containing(dir: &Path) -> Option<Scope> {
+        let repo = crate::repo::find(dir)?;
+        Some(Scope {
+            root: repo.main_root,
+            name: repo.name,
+            remote: repo.remote,
+        })
+    }
+
+    /// The repository quarry was started in.
+    pub fn here() -> Option<Scope> {
+        Scope::containing(&std::env::current_dir().ok()?)
+    }
+
+    /// `quarry · oddurs/quarry`, or just the name when there is no remote.
+    pub fn label(&self) -> String {
+        match &self.remote {
+            Some(r) => format!("{} · {r}", self.name),
+            None => self.name.clone(),
+        }
+    }
+}
+
+/// How the list is divided.
+///
+/// By project is what quarry is for — the question it answers that `lsof` does
+/// not. But once you are asking a different question the division gets in the
+/// way: "every database on this machine" wants them together, and a filtered
+/// list wants no headings at all.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum GroupBy {
+    #[default]
+    Project,
+    Kind,
+    /// One flat list. Not a group of everything — no headings at all.
+    Nothing,
+}
+
+impl GroupBy {
+    pub const ALL: &'static [GroupBy] = &[GroupBy::Project, GroupBy::Kind, GroupBy::Nothing];
+
+    pub fn next(self) -> GroupBy {
+        match self {
+            GroupBy::Project => GroupBy::Kind,
+            GroupBy::Kind => GroupBy::Nothing,
+            GroupBy::Nothing => GroupBy::Project,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            GroupBy::Project => "project",
+            GroupBy::Kind => "kind",
+            GroupBy::Nothing => "nothing",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<GroupBy> {
+        let name = name.trim().to_lowercase();
+        GroupBy::ALL.iter().copied().find(|g| g.name() == name)
+    }
+}
+
+/// The order within a group.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum SortBy {
+    /// Health, then port. What you want when you are looking for a problem.
+    #[default]
+    Health,
+    Port,
+    Name,
+    /// Most recently started first — what did I just start, and what has been
+    /// up since Tuesday.
+    Newest,
+}
+
+impl SortBy {
+    pub const ALL: &'static [SortBy] =
+        &[SortBy::Health, SortBy::Port, SortBy::Name, SortBy::Newest];
+
+    pub fn next(self) -> SortBy {
+        match self {
+            SortBy::Health => SortBy::Port,
+            SortBy::Port => SortBy::Name,
+            SortBy::Name => SortBy::Newest,
+            SortBy::Newest => SortBy::Health,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            SortBy::Health => "health",
+            SortBy::Port => "port",
+            SortBy::Name => "name",
+            SortBy::Newest => "newest",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<SortBy> {
+        let name = name.trim().to_lowercase();
+        SortBy::ALL.iter().copied().find(|s| s.name() == name)
+    }
+}
+
+/// What the filter box is asking for.
+///
+/// Plain words match anything about a service, which is the right default —
+/// most of the time you half-remember one thing about it. But "3000" also
+/// matches a pid, a latency and a command line, and `db` matches every
+/// database *and* every path with `db` in it. A prefix narrows the question to
+/// one field, and several terms narrow together.
+///
+/// `:3000 @web` — web servers on a port containing 3000.
+/// `~acme` — anything belonging to the acme project.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Query {
+    terms: Vec<Term>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Term {
+    /// `!` in front: match everything this does not.
+    negated: bool,
+    what: Match,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Match {
+    /// `:3000` — the port.
+    Port(String),
+    /// `@web` — the kind.
+    Kind(String),
+    /// `~acme` — the project.
+    Project(String),
+    /// Anything at all.
+    Any(String),
+}
+
+impl Query {
+    pub fn parse(text: &str) -> Query {
+        let terms = text
+            .split_whitespace()
+            .filter_map(|word| {
+                let (negated, word) = match word.strip_prefix('!') {
+                    Some(rest) => (true, rest),
+                    None => (false, word),
+                };
+                let (make, rest) = match word.split_at_checked(1) {
+                    Some((":", rest)) => (Match::Port as fn(String) -> Match, rest),
+                    Some(("@", rest)) => (Match::Kind as fn(String) -> Match, rest),
+                    Some(("~", rest)) => (Match::Project as fn(String) -> Match, rest),
+                    _ => (Match::Any as fn(String) -> Match, word),
+                };
+                // A lone `:` is someone part-way through typing, not a term
+                // that matches everything — and a lone `!` is not a term that
+                // matches nothing.
+                (!rest.is_empty()).then(|| Term {
+                    negated,
+                    what: make(rest.to_lowercase()),
+                })
+            })
+            .collect();
+        Query { terms }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.terms.is_empty()
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -440,6 +656,10 @@ pub struct Server {
     /// The container behind this port, where the runtime published one.
     pub container: Option<crate::docker::Container>,
     pub started_at: u64,
+    /// When quarry first saw this listening, if it appeared while quarry was
+    /// watching. `None` for anything that was already there — the first scan
+    /// is not news, and marking the whole machine as new would say nothing.
+    pub appeared: Option<Instant>,
     pub cpu: f32,
     pub mem: u64,
     pub health: Health,
@@ -453,6 +673,22 @@ impl Server {
         self.listeners.first()
     }
 
+    /// Who to talk to in order to stop or restart this.
+    ///
+    /// The container where there is one. A published port is held by the
+    /// runtime's forwarder, not by the container, so the pid quarry can see is
+    /// the wrong thing to signal — at best it breaks the forward and leaves
+    /// the container running, at worst it is part of the daemon.
+    pub fn lifecycle(&self) -> crate::lifecycle::Target {
+        match &self.container {
+            Some(c) => crate::lifecycle::Target::Container(Box::new(c.clone())),
+            None => crate::lifecycle::Target::Process {
+                pid: self.pid,
+                port: self.listeners.iter().find(|l| !l.is_unix()).map(|l| l.port),
+            },
+        }
+    }
+
     pub fn primary_port(&self) -> u16 {
         self.listeners.first().map(|l| l.port).unwrap_or(0)
     }
@@ -460,6 +696,11 @@ impl Server {
     /// What to show where a port would go.
     pub fn primary_label(&self) -> String {
         self.primary().map(|l| l.label()).unwrap_or_default()
+    }
+
+    /// The same, for a column of fixed width.
+    pub fn primary_column(&self) -> String {
+        self.primary().map(|l| l.column()).unwrap_or_default()
     }
 
     /// True when nothing here can be reached over a port.
@@ -542,6 +783,38 @@ impl Server {
         }
     }
 
+    /// Whether this belongs to the project in scope.
+    ///
+    /// By the repository it resolved to, which is why a container counts: a
+    /// Compose stack is attributed to the directory its file lives in, so a
+    /// database declared in the repository is part of the project as much as
+    /// the server started from a shell in it.
+    pub fn in_scope(&self, scope: &Scope) -> bool {
+        self.repo
+            .as_ref()
+            .is_some_and(|r| r.main_root == scope.root)
+    }
+
+    /// Which checkout of one project this came from.
+    ///
+    /// Inside a single repository, what distinguishes two services is not the
+    /// project — they share it — but the branch. That is also what a person
+    /// calls a worktree: not `.worktrees/quarry/feat/repo-scope` but
+    /// `feat/repo-scope`. A detached head has no branch to call it, so the
+    /// directory does.
+    pub fn worktree_key(&self) -> String {
+        let Some(repo) = &self.repo else {
+            return self.group_key();
+        };
+        if let Some(branch) = &repo.branch {
+            return branch.clone();
+        }
+        repo.root
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| repo.root.display().to_string())
+    }
+
     pub fn group_source(&self) -> GroupSource {
         if self.repo.is_some() {
             GroupSource::Repo
@@ -576,6 +849,21 @@ impl Server {
 
     /// Whether a filter matches. `needle` must already be lowercase — the
     /// caller lowercases once rather than every service lowercasing it again.
+    /// Every term has to match. Terms narrow; they do not accumulate
+    /// alternatives — `:3000 @web` means both, which is the only reading that
+    /// makes typing a second term useful.
+    pub fn satisfies(&self, query: &Query) -> bool {
+        query.terms.iter().all(|term| {
+            let hit = match &term.what {
+                Match::Port(p) => self.listeners.iter().any(|l| port_contains(l.port, p)),
+                Match::Kind(k) => contains_ci(self.kind.label(), k),
+                Match::Project(r) => contains_ci(&self.group_key(), r),
+                Match::Any(word) => self.matches(word),
+            };
+            hit != term.negated
+        })
+    }
+
     pub fn matches(&self, needle: &str) -> bool {
         if needle.is_empty() {
             return true;

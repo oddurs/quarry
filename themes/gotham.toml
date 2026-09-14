@@ -16,7 +16,10 @@ heading      = "#d3ebe9"
 
 border       = "#0e2129"
 border_focus = "#33859d"
-selection    = "#245361"
+selection    = "#0a3749"   # base03 — the row you are on. Not #245361: that is
+                           # `faint`, so the highlight was the colour of the borders
+fresh        = "#123a1e"   # a service that has just appeared, for half a minute.
+                           # Green rather than teal, or it reads as the selection
 
 accent       = "#edb54b"   # the one warm note, used sparingly
 secondary    = "#33859d"
