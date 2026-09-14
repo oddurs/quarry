@@ -773,6 +773,56 @@ pub fn is_dark(color: Color) -> bool {
 mod tests {
     use super::*;
 
+    /// A highlight has to be visibly different from the things it sits among.
+    ///
+    /// Gotham shipped with `selection` set to the same value as `faint`, so
+    /// the row you were on was painted the colour of the pane borders — and
+    /// once it was calmed down it landed a few points from the tint that marks
+    /// a service as newly arrived, which is a different thing to say.
+    #[test]
+    fn every_shipped_theme_can_tell_its_states_apart() {
+        fn far_apart(a: Color, b: Color) -> bool {
+            match (a, b) {
+                (Color::Rgb(r1, g1, b1), Color::Rgb(r2, g2, b2)) => {
+                    let d = |x: u8, y: u8| (x as i32 - y as i32).abs();
+                    // Manhattan distance in sRGB. Crude, but it is measuring
+                    // "could these be mistaken for each other at a glance",
+                    // and for that it is enough.
+                    d(r1, r2) + d(g1, g2) + d(b1, b2) >= 24
+                }
+                _ => a != b,
+            }
+        }
+
+        for (name, body) in BUILTIN {
+            let t = Theme::from_toml(body, name, Source::Builtin).expect("a shipped theme parses");
+            for (role, colour) in [
+                ("faint", t.faint),
+                ("background", t.background),
+                ("surface", t.surface),
+                ("border", t.border),
+            ] {
+                assert!(
+                    far_apart(t.selection, colour),
+                    "{name}: the selected row is {:?}, which is {role}",
+                    t.selection
+                );
+            }
+            let fresh = t
+                .fresh
+                .unwrap_or_else(|| panic!("{name} names no arrival tint"));
+            assert!(
+                far_apart(fresh, t.selection),
+                "{name}: an arrival ({fresh:?}) and the selected row ({:?}) look alike",
+                t.selection
+            );
+            assert!(
+                far_apart(fresh, t.background),
+                "{name}: the arrival tint is the page itself"
+            );
+        }
+    }
+
     #[test]
     fn auto_never_uses_a_colour_the_terminal_did_not_choose() {
         // The entire point of `auto`: one RGB value here and the theme stops

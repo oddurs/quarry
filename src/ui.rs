@@ -1251,25 +1251,40 @@ pub fn render_background_to_string(app: &mut App, width: u16, height: u16, tick:
 pub fn render_html(app: &mut App, width: u16, height: u16, tick: usize) -> String {
     let buf = render_frame(app, width, height, tick);
     let theme = app.theme.clone();
-    let mut out = String::from("<pre class=\"tui\" aria-label=\"quarry running in a terminal\">");
+    // The page's own ground, so the markup does not depend on whatever it is
+    // dropped into. A light theme rendered onto a dark page is not that theme.
+    let ground = css_colour(Some(theme.background), &theme);
+    let mut out = format!(
+        "<pre class=\"tui\" style=\"background:{ground}\" \
+         aria-label=\"quarry running in a terminal\">"
+    );
 
     for y in 0..buf.area.height {
-        let mut run: Option<(String, String)> = None; // (colour, text)
+        let mut run: Option<(Ink, String)> = None;
         for x in 0..buf.area.width {
             let cell = &buf[(x, y)];
-            let colour = css_colour(cell.style().fg, &theme);
+            let style = cell.style();
+            // Backgrounds are not decoration here: the selected row and a
+            // service that has just appeared are *only* a change of ground, so
+            // markup that carries the foreground alone shows neither of them.
+            let ink = Ink {
+                fg: css_colour(style.fg, &theme),
+                bg: (style.bg.unwrap_or(ratatui::style::Color::Reset)
+                    != ratatui::style::Color::Reset)
+                    .then(|| css_colour(style.bg, &theme)),
+            };
             let symbol = escape(cell.symbol());
             match &mut run {
-                Some((current, text)) if *current == colour => text.push_str(&symbol),
+                Some((current, text)) if *current == ink => text.push_str(&symbol),
                 Some((current, text)) => {
                     push_span(&mut out, current, text);
-                    run = Some((colour, symbol));
+                    run = Some((ink, symbol));
                 }
-                None => run = Some((colour, symbol)),
+                None => run = Some((ink, symbol)),
             }
         }
-        if let Some((colour, text)) = run.take() {
-            push_span(&mut out, &colour, &text);
+        if let Some((ink, text)) = run.take() {
+            push_span(&mut out, &ink, &text);
         }
         if y + 1 < buf.area.height {
             out.push('\n');
@@ -1279,13 +1294,27 @@ pub fn render_html(app: &mut App, width: u16, height: u16, tick: usize) -> Strin
     out
 }
 
-fn push_span(out: &mut String, colour: &str, text: &str) {
-    if text.trim().is_empty() {
-        // Blank runs need no colour, and leaving them bare keeps the markup
-        // roughly half the size.
-        out.push_str(text);
-    } else {
-        out.push_str(&format!("<span style=\"color:{colour}\">{text}</span>"));
+/// What a run of cells is painted with.
+#[derive(PartialEq, Eq)]
+struct Ink {
+    fg: String,
+    /// `None` for the page's own ground, which needs no markup.
+    bg: Option<String>,
+}
+
+fn push_span(out: &mut String, ink: &Ink, text: &str) {
+    match (&ink.bg, text.trim().is_empty()) {
+        // Blank runs on the page's own ground need no colour, and leaving them
+        // bare keeps the markup roughly half the size.
+        (None, true) => out.push_str(text),
+        (None, false) => out.push_str(&format!("<span style=\"color:{}\">{text}</span>", ink.fg)),
+        // A run on its own ground is kept whether or not it has glyphs in it: a
+        // highlight bar is mostly padding, and dropping the blanks would leave
+        // it in pieces.
+        (Some(bg), _) => out.push_str(&format!(
+            "<span style=\"color:{};background:{bg}\">{text}</span>",
+            ink.fg
+        )),
     }
 }
 
