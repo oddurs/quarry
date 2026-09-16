@@ -15,6 +15,7 @@ heading      = "#c0caf5"
 border       = "#414868"
 border_focus = "#7aa2f7"
 selection    = "#292e42"
+fresh        = "#243026"   # a service that has just appeared, for half a minute
 
 accent       = "#7aa2f7"
 secondary    = "#7dcfff"
@@ -24,6 +25,7 @@ redirect     = "#7dcfff"
 client_error = "#e0af68"
 server_error = "#f7768e"
 open         = "#73daca"
+starting     = "#e0af68"   # bound, and not yet serving
 closed       = "#f7768e"
 unknown      = "#414868"
 

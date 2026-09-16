@@ -13,7 +13,9 @@ heading      = "#131210"
 
 border       = "#d9d5c8"
 border_focus = "#2a6f9e"
-selection    = "#e6e1d2"
+selection    = "#dfe9f1"   # tied to the accent. The old paper tint was so close
+                           # to the page that only the gutter bar marked the row
+fresh        = "#e3eddc"   # a service that has just appeared, for half a minute
 
 accent       = "#2a6f9e"
 secondary    = "#0f7a6a"
@@ -25,6 +27,7 @@ redirect     = "#0f6f8a"
 client_error = "#9a6410"
 server_error = "#b0261f"
 open         = "#0f7a6a"
+starting     = "#a8641b"   # bound, and not yet serving
 closed       = "#b0261f"
 unknown      = "#a8a496"
 
