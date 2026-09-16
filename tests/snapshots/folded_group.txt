@@ -1,20 +1,20 @@
  quarry  3 listening · 2 projects · 2 unhealthy                                    updated just now
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-╭ Services ────────────────────────────────────────╮╭ Detail ──────────────────────────────────────╮
-│ ▾ acme-api  feat/billing  acme/acme-api         1││ ▸ acme-web                                   │
-│  ●  8000 python3 uvicorn         api  200   31ms ││   2 services · 1 not answering               │
-│▌▸ acme-web  main  acme/acme-web             ✕1  2││                                              │
-│ ▾ no project                                ✕1  2││ REPOSITORY                                   │
-│  ●  5432 postgres                 db  open       ││   branch  main                               │
-│  ✕  6379 redis-server          cache  no answer  ││   remote  acme/acme-web                      │
-│                                                  ││   path    /src/acme-web                      │
-│                                                  ││                                              │
-│                                                  ││ SERVICES                                     │
-│                                                  ││   ● 3000   next-server                       │
-│                                                  ││   ▲ 3001   node worker.js                    │
-│                                                  ││                                              │
-│                                                  ││   space to expand                            │
-│                                                  ││                                              │
-│                                                  ││                                              │
-╰──────────────────────────────────────────────────╯╰──────────────────────────────────────────────╯
- ↑↓ move  ↵ open  y copy  / filter  a all  K stop  r refresh  ? help
+╭ Services ──────────────────────────────────────────╮╭ Detail ────────────────────────────────────╮
+│ ▸ acme-web  main  acme/acme-web             ✕1  2  ││ ● postgres                                 │
+│ ▾ no project                                ✕1  2  ││   postgres · db · pid 15432                │
+│▌ ●  5432 postgres                   db  open 0.4ms ││                                            │
+│  ✕  6379 redis-server            cache  no answer  ││ ADDRESS                                    │
+│ ▾ acme-api  feat/billing  acme/acme-api         1  ││   http://localhost:5432                    │
+│  ●  8000 python3 uvicorn           api  200   31ms ││   enter copies this, it cannot be opened   │
+│                                                    ││                                            │
+│                                                    ││ HEALTH                                     │
+│                                                    ││   ● open · 0.4ms                           │
+│                                                    ││                                            │
+│                                                    ││ LISTENING                                  │
+│                                                    ││   5432  127.0.0.1  loopback                │
+│                                                    ││                                            │
+│                                                    ││ PROCESS                                    │
+│                                                    ││   user    dev                              │
+╰────────────────────────────────────────────────────╯╰────────────────────────────────────────────╯
+ ↑↓ move  ↵ open  y copy  / filter  a all  . here  K stop  R restart  r refresh  ? help

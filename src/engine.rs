@@ -5,10 +5,11 @@
 //! same code path runs with no machine underneath it, which is how the
 //! discovery tests work.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::time::{Duration, Instant};
 
 use crate::diag;
-use crate::model::{Kind, Listener, Rules, Server, classify};
+use crate::model::{Kind, Launcher, Listener, Rules, Server, classify};
 use crate::repo::Resolver;
 use crate::signature::{Evidence, Registry, Verdict};
 use crate::source::{CwdSource, ProcInfo, ProcessSource, SocketSource, SourceError};
@@ -26,6 +27,15 @@ pub struct Engine {
     rules: Rules,
     signatures: Registry,
     containers: crate::docker::Containers,
+    tunnels: crate::tunnel::Tunnels,
+    /// Set when a test pinned the container list, so a scan does not go and
+    /// ask a real runtime what is running.
+    pinned_containers: bool,
+    /// The listening ports as of the last runtime query. A container cannot
+    /// appear or vanish without a published port doing the same, so an
+    /// unchanged set means the answer we already have is still the answer.
+    ports_when_asked: Option<BTreeSet<u16>>,
+    asked_at: Option<Instant>,
     scans: u64,
 }
 
@@ -51,6 +61,10 @@ impl Engine {
             rules: Rules::default(),
             signatures: Registry::builtin(),
             containers: Default::default(),
+            tunnels: Default::default(),
+            pinned_containers: false,
+            ports_when_asked: None,
+            asked_at: None,
             scans: 0,
         }
     }
@@ -59,6 +73,17 @@ impl Engine {
     /// built-in tables.
     pub fn with_rules(mut self, rules: Rules) -> Self {
         self.rules = rules;
+        self
+    }
+
+    /// Pin the container list instead of asking a runtime.
+    ///
+    /// Everything else in the pipeline is drivable from fixtures; this was
+    /// not, which is why the one bug that needs *several* containers on one
+    /// process went unnoticed until a real stack was put in front of it.
+    pub fn with_containers(mut self, containers: crate::docker::Containers) -> Self {
+        self.containers = containers;
+        self.pinned_containers = true;
         self
     }
 
@@ -103,6 +128,16 @@ impl Engine {
                 "the kernel would not enumerate processes; falling back to lsof",
             );
         }
+        #[cfg(target_os = "linux")]
+        {
+            if crate::linux::available() {
+                return Box::new(crate::linux::Proc::default());
+            }
+            diag::warn(
+                "engine",
+                "no readable /proc on this machine; falling back to lsof",
+            );
+        }
         Box::new(crate::lsof::Lsof)
     }
 
@@ -118,48 +153,118 @@ impl Engine {
             self.repos.clear();
         }
 
-        // Asked once per scan, not once per port.
-        self.containers = crate::docker::Containers::query();
+        let found = self.listening()?;
+        self.refresh_runtimes(&found);
+        let pids: Vec<u32> = found.holders.keys().copied().collect();
+        let info = self.process_table(pids.clone());
+        let launchers = self.launchers(&pids, &info);
 
+        let mut servers: Vec<Server> = found
+            .holders
+            .into_iter()
+            .flat_map(|(pid, holder)| self.assemble(pid, holder, &info, &launchers))
+            .collect();
+        servers.sort_by(|a, b| {
+            a.group_key()
+                .cmp(&b.group_key())
+                .then(a.primary_port().cmp(&b.primary_port()))
+        });
+
+        Ok(ScanReport {
+            servers,
+            warnings: found.warnings,
+            truncated: found.truncated,
+        })
+    }
+
+    /// Ask the container runtime and the tunnel agent what they are publishing
+    /// — but only when the answer can have changed.
+    ///
+    /// This is the most expensive thing in a scan by a wide margin. A Docker
+    /// daemon on macOS lives behind a VM boundary and takes twenty to thirty
+    /// milliseconds to list its containers; the rest of a scan is two. Asking
+    /// every six seconds for an answer that changes once an hour was most of
+    /// what quarry spent its time on.
+    ///
+    /// A container cannot appear or vanish without a published port doing the
+    /// same, and the ports are already in hand — so an unchanged set of ports
+    /// means the answer we have is still the answer. The interval is a
+    /// backstop for what that misses: a container replaced on the same port,
+    /// or renamed.
+    fn refresh_runtimes(&mut self, found: &Listening) {
+        let ports: BTreeSet<u16> = found
+            .holders
+            .values()
+            .flat_map(|h| h.listeners.iter())
+            .map(|l| l.port)
+            .filter(|p| *p != 0)
+            .collect();
+
+        let changed = self.ports_when_asked.as_ref() != Some(&ports);
+        let stale = self
+            .asked_at
+            .is_none_or(|at| at.elapsed() >= RUNTIME_INTERVAL);
+        if !changed && !stale {
+            return;
+        }
+
+        if !self.pinned_containers {
+            self.containers = crate::docker::Containers::query();
+        }
+        self.tunnels = crate::tunnel::Tunnels::query();
+        self.ports_when_asked = Some(ports);
+        self.asked_at = Some(Instant::now());
+    }
+
+    /// Every listening socket, gathered by the process holding it.
+    ///
+    /// One process may hold many sockets, so they are grouped before the
+    /// process table is touched at all — that way each pid is asked about
+    /// exactly once however many ports it has open.
+    fn listening(&mut self) -> Result<Listening, SourceError> {
         let mut raw = self.sockets.listening()?;
         let mut warnings = Vec::new();
 
         let truncated = raw.len() > MAX_SERVERS;
         if truncated {
-            warnings.push(format!(
+            let warning = format!(
                 "{} listening sockets found; showing the first {MAX_SERVERS}",
                 raw.len()
-            ));
-            diag::warn("engine", warnings[0].clone());
+            );
+            diag::warn("engine", warning.clone());
+            warnings.push(warning);
             raw.truncate(MAX_SERVERS);
         }
 
-        // One process may hold many sockets; group before touching the process
-        // table so we ask about each pid exactly once.
-        let mut grouped: BTreeMap<u32, (String, String, Vec<Listener>)> = BTreeMap::new();
+        let mut holders: BTreeMap<u32, Holder> = BTreeMap::new();
         for socket in raw {
-            let entry = grouped
-                .entry(socket.pid)
-                .or_insert_with(|| (socket.command.clone(), socket.user.clone(), Vec::new()));
-            if entry.0.is_empty() {
-                entry.0 = socket.command;
+            let holder = holders.entry(socket.pid).or_default();
+            // The first socket to name the process wins; some report neither.
+            if holder.command.is_empty() {
+                holder.command = socket.command;
             }
-            if entry.1.is_empty() {
-                entry.1 = socket.user;
+            if holder.user.is_empty() {
+                holder.user = socket.user;
             }
-            entry.2.push(socket.listener);
+            holder.listeners.push(socket.listener);
         }
+        Ok(Listening {
+            holders,
+            warnings,
+            truncated,
+        })
+    }
 
-        let pids: Vec<u32> = grouped.keys().copied().collect();
+    /// What the process table knows about each of them.
+    fn process_table(&mut self, pids: Vec<u32>) -> BTreeMap<u32, ProcInfo> {
         self.procs.refresh(&pids);
-
         let mut info: BTreeMap<u32, ProcInfo> = pids
             .iter()
             .map(|pid| (*pid, self.procs.info(*pid).unwrap_or_default()))
             .collect();
 
-        // Fall back to the expensive lookup only for the processes whose
-        // working directory we could not otherwise read.
+        // The expensive lookup runs only for the processes whose working
+        // directory could not be read the cheap way.
         let missing: Vec<u32> = info
             .iter()
             .filter(|(_, i)| i.cwd.is_none())
@@ -172,136 +277,361 @@ impl Engine {
                 }
             }
         }
+        info
+    }
 
-        let mut servers = Vec::with_capacity(grouped.len());
-        for (pid, (command, user, mut listeners)) in grouped {
-            let i = info.remove(&pid).unwrap_or_default();
+    /// The command that started each service, where several share one.
+    ///
+    /// `turbo dev`, `overmind`, a Procfile or a plain shell script routinely
+    /// start five or ten servers at once, and in a monorepo they do not even
+    /// share a working directory. The value is not tidiness: knowing that nine
+    /// things came from one command tells you they stop together, and which
+    /// single process to stop.
+    fn launchers(
+        &mut self,
+        pids: &[u32],
+        info: &BTreeMap<u32, ProcInfo>,
+    ) -> BTreeMap<u32, Launcher> {
+        // The parent chain of every service, walked once. Only the listening
+        // pids have been looked up so far, so each generation is fetched as a
+        // batch rather than one process at a time.
+        let mut parents: BTreeMap<u32, ProcInfo> = BTreeMap::new();
+        let mut frontier: Vec<u32> = pids
+            .iter()
+            .filter_map(|pid| info.get(pid).and_then(|i| i.ppid))
+            .filter(|ppid| *ppid > 1)
+            .collect();
 
-            // TCP first, then UDP, then unix: a service reachable several ways
-            // is named after the one people use. Deduped on the whole endpoint,
-            // since every unix socket has port zero.
-            listeners.sort_by(|a, b| {
-                a.transport
-                    .cmp(&b.transport)
-                    .then(a.port.cmp(&b.port))
-                    .then(a.path.cmp(&b.path))
-                    .then(a.addr.is_ipv6().cmp(&b.addr.is_ipv6()))
-            });
-            listeners.dedup_by(|a, b| {
-                a.transport == b.transport && a.port == b.port && a.path == b.path
-            });
-            if listeners.is_empty() {
-                continue;
+        for _ in 0..MAX_ANCESTRY {
+            frontier.sort_unstable();
+            frontier.dedup();
+            frontier.retain(|pid| !parents.contains_key(pid));
+            if frontier.is_empty() {
+                break;
             }
-
-            let command = if command.is_empty() {
-                i.name.clone()
-            } else {
-                command
-            };
-            let cwd = i.cwd.clone();
-            let exe = i.exe.clone();
-            // A published port belongs to the runtime as far as the operating
-            // system is concerned. The daemon knows whose it really is.
-            let container = listeners
-                .iter()
-                .filter(|l| l.port != 0)
-                .find_map(|l| self.containers.get(l.port))
-                .cloned();
-            // The working directory is the strong signal. The executable's
-            // location is a weak one — every Homebrew-installed daemon lives
-            // inside Homebrew's own git repository — so it is consulted only
-            // when there is no working directory at all, and never for a
-            // package manager's prefix.
-            // A Compose project names a directory on disk, which resolves to a
-            // repository exactly as a process's working directory does — so a
-            // container and a process from one repo land in one group.
-            let compose_repo = container
-                .as_ref()
-                .and_then(|c| c.working_dir.as_deref())
-                .and_then(|d| self.repos.resolve(d));
-
-            let repo = match cwd.as_deref() {
-                Some(c) => self.repos.resolve(c),
-                None => exe
-                    .as_deref()
-                    .and_then(|e| e.parent())
-                    .and_then(|d| self.repos.resolve(d))
-                    .filter(|r| !is_package_prefix(&r.root)),
-            };
-            let repo = compose_repo.or(repo);
-
-            let ports: Vec<u16> = listeners
-                .iter()
-                .filter(|l| l.port != 0)
-                .map(|l| l.port)
-                .collect();
-            let uri_port = ports.first().copied().unwrap_or(0);
-            let uri_path = listeners
-                .first()
-                .and_then(|l| l.path.as_ref())
-                .map(|p| p.display().to_string());
-            let identified = identify(
-                &self.rules,
-                &self.signatures,
-                &Evidence {
-                    command: &command,
-                    cmdline: &i.cmdline,
-                    ports: &ports,
-                    ..Default::default()
-                },
-            );
-            let signature = identified
-                .verdict
-                .as_ref()
-                .and_then(|v| self.signatures.get(v.index));
-
-            servers.push(Server {
-                pid,
-                ppid: i.ppid,
-                command,
-                cmdline: i.cmdline,
-                exe,
-                user,
-                cwd,
-                listeners,
-                repo,
-                kind: identified.kind,
-                service: identified
-                    .verdict
-                    .as_ref()
-                    .filter(|v| v.names_the_service())
-                    .map(|v| v.name.clone()),
-                health_path: signature.and_then(|s| s.health.clone()),
-                uri: signature.and_then(|s| s.uri_for(uri_port, uri_path.as_deref())),
-                note: signature.and_then(|s| s.note.clone()),
-                handshake: signature.and_then(|s| s.probe.clone()),
-                banner: None,
-                evidence: identified
-                    .verdict
-                    .as_ref()
-                    .map(|v| v.reasons.clone())
-                    .unwrap_or_default(),
-                container,
-                started_at: i.started_at,
-                cpu: i.cpu,
-                mem: i.mem,
-                health: Default::default(),
-            });
+            self.procs.refresh(&frontier);
+            let mut next = Vec::new();
+            for pid in std::mem::take(&mut frontier) {
+                let Some(i) = self.procs.info(pid) else {
+                    continue;
+                };
+                if let Some(ppid) = i.ppid.filter(|p| *p > 1) {
+                    next.push(ppid);
+                }
+                parents.insert(pid, i);
+            }
+            frontier = next;
         }
 
-        servers.sort_by(|a, b| {
-            a.group_key()
-                .cmp(&b.group_key())
-                .then(a.primary_port().cmp(&b.primary_port()))
-        });
+        // For each service, the nearest ancestor worth naming.
+        let mut nearest: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
+        for pid in pids {
+            let mut at = info.get(pid).and_then(|i| i.ppid);
+            for _ in 0..MAX_ANCESTRY {
+                let Some(current) = at.filter(|p| *p > 1) else {
+                    break;
+                };
+                let Some(i) = parents.get(&current) else {
+                    break;
+                };
+                if worth_grouping_by(i) {
+                    nearest.entry(current).or_default().push(*pid);
+                    break;
+                }
+                at = i.ppid;
+            }
+        }
 
-        Ok(ScanReport {
-            servers,
-            warnings,
-            truncated,
-        })
+        // An ancestor that started one service tells you nothing you did not
+        // already know from the service itself.
+        nearest
+            .into_iter()
+            .filter(|(_, children)| children.len() > 1)
+            .flat_map(|(ancestor, children)| {
+                let i = parents.get(&ancestor).cloned().unwrap_or_default();
+                let launcher = Launcher {
+                    pid: ancestor,
+                    command: crate::model::friendly_process(&i.name, &i.cmdline),
+                };
+                children
+                    .into_iter()
+                    .map(move |child| (child, launcher.clone()))
+            })
+            .collect()
     }
+
+    /// One process and its sockets, turned into the things the screen shows.
+    ///
+    /// Usually one. A container runtime publishes every port from a single
+    /// process — `com.docker.backend` held all eleven ports of an eleven
+    /// service stack — so grouping by pid alone put eleven containers on one
+    /// row, named after whichever the first listener resolved to. The
+    /// container is the service; the forwarder is not.
+    fn assemble(
+        &mut self,
+        pid: u32,
+        holder: Holder,
+        info: &BTreeMap<u32, ProcInfo>,
+        launchers: &BTreeMap<u32, Launcher>,
+    ) -> Vec<Server> {
+        let Holder {
+            command,
+            user,
+            mut listeners,
+        } = holder;
+        let i = info.get(&pid).cloned().unwrap_or_default();
+
+        // TCP first, then UDP, then unix: a service reachable several ways is
+        // named after the one people use. Deduped on the whole endpoint, since
+        // every unix socket has port zero.
+        listeners.sort_by(|a, b| {
+            a.transport
+                .cmp(&b.transport)
+                .then(a.port.cmp(&b.port))
+                .then(a.path.cmp(&b.path))
+                .then(a.addr.is_ipv6().cmp(&b.addr.is_ipv6()))
+        });
+        listeners
+            .dedup_by(|a, b| a.transport == b.transport && a.port == b.port && a.path == b.path);
+        if listeners.is_empty() {
+            return Vec::new();
+        }
+
+        let command = if command.is_empty() {
+            i.name.clone()
+        } else {
+            command
+        };
+
+        // A published port belongs to the runtime as far as the operating
+        // system is concerned. The daemon knows whose it really is — and where
+        // one process is publishing several, each one is its own service.
+        // Ports behind no container stay together: that is the runtime's own
+        // listener, and it is one thing.
+        let mut split: BTreeMap<Option<String>, Vec<Listener>> = BTreeMap::new();
+        for listener in listeners {
+            let id = (listener.port != 0)
+                .then(|| self.containers.get(listener.port))
+                .flatten()
+                .map(|c| c.id.clone());
+            split.entry(id).or_default().push(listener);
+        }
+
+        split
+            .into_values()
+            .map(|listeners| self.one(pid, &command, &user, &i, listeners, launchers))
+            .collect()
+    }
+
+    /// One row: a process, or one container published by it.
+    #[allow(clippy::too_many_arguments)]
+    fn one(
+        &mut self,
+        pid: u32,
+        command: &str,
+        user: &str,
+        i: &ProcInfo,
+        listeners: Vec<Listener>,
+        launchers: &BTreeMap<u32, Launcher>,
+    ) -> Server {
+        let command = command.to_string();
+        let user = user.to_string();
+        let i = i.clone();
+        let container = listeners
+            .iter()
+            .filter(|l| l.port != 0)
+            .find_map(|l| self.containers.get(l.port))
+            .cloned();
+        let exposed = listeners
+            .iter()
+            .filter(|l| l.port != 0)
+            .find_map(|l| self.tunnels.get(l.port))
+            .cloned();
+        let repo = self.attribute(&i, container.as_ref());
+
+        let ports: Vec<u16> = listeners
+            .iter()
+            .filter(|l| l.port != 0)
+            .map(|l| l.port)
+            .collect();
+        let uri_port = ports.first().copied().unwrap_or(0);
+        let uri_path = listeners
+            .first()
+            .and_then(|l| l.path.as_ref())
+            .map(|p| p.display().to_string());
+        // For a published port the host process is the runtime, which
+        // classifies as `container` and is not wrong about itself — it is
+        // simply not the service. The daemon already told us the image, and
+        // `postgres:16-alpine` says far more than `com.docker.backend` does.
+        let (command_evidence, cmdline_evidence) = match &container {
+            Some(c) => (c.image_name(), c.image.as_str()),
+            None => (command.as_str(), i.cmdline.as_str()),
+        };
+        let identified = identify(
+            &self.rules,
+            &self.signatures,
+            &Evidence {
+                command: command_evidence,
+                cmdline: cmdline_evidence,
+                ports: &ports,
+                ..Default::default()
+            },
+        );
+        let signature = identified
+            .verdict
+            .as_ref()
+            .and_then(|v| self.signatures.get(v.index));
+        let verdict = identified.verdict.as_ref();
+
+        // An image the table knows nothing about is still a containerised
+        // service, which says more than `other` does.
+        let kind = match (identified.kind, &container) {
+            (Kind::Other, Some(_)) => Kind::Container,
+            (kind, _) => kind,
+        };
+
+        Server {
+            pid,
+            ppid: i.ppid,
+            command,
+            cmdline: i.cmdline,
+            exe: i.exe,
+            user,
+            cwd: i.cwd,
+            listeners,
+            repo,
+            kind,
+            service: verdict
+                .filter(|v| v.names_the_service())
+                .map(|v| v.name.clone()),
+            health_path: signature.and_then(|s| s.health.clone()),
+            uri: signature.and_then(|s| s.uri_for(uri_port, uri_path.as_deref())),
+            note: signature.and_then(|s| s.note.clone()),
+            handshake: signature.and_then(|s| s.probe.clone()),
+            banner: None,
+            unconfirmed: false,
+            version: None,
+            serving: None,
+            exposed,
+            certificate: None,
+            launcher: launchers.get(&pid).cloned(),
+            silent: false,
+            evidence: verdict.map(|v| v.reasons.clone()).unwrap_or_default(),
+            container,
+            started_at: i.started_at,
+            appeared: None,
+            cpu: i.cpu,
+            mem: i.mem,
+            health: crate::model::Health::default(),
+        }
+    }
+
+    /// Which project a process belongs to.
+    ///
+    /// A Compose project names a directory on disk, which resolves to a
+    /// repository exactly as a working directory does — so a container and a
+    /// process started from one repo land in one group, and the container's
+    /// claim is the stronger of the two.
+    ///
+    /// Otherwise the working directory is the signal. The executable's location
+    /// is a weak one — every Homebrew-installed daemon lives inside Homebrew's
+    /// own git repository — so it is consulted only when there is no working
+    /// directory at all, and never for a package manager's prefix.
+    fn attribute(
+        &mut self,
+        i: &ProcInfo,
+        container: Option<&crate::docker::Container>,
+    ) -> Option<crate::model::Repo> {
+        let compose = container
+            .and_then(|c| c.working_dir.as_deref())
+            .and_then(|d| self.repos.resolve(d));
+        if compose.is_some() {
+            return compose;
+        }
+        match i.cwd.as_deref() {
+            Some(cwd) => self.repos.resolve(cwd),
+            None => i
+                .exe
+                .as_deref()
+                .and_then(|e| e.parent())
+                .and_then(|d| self.repos.resolve(d))
+                .filter(|r| !is_package_prefix(&r.root)),
+        }
+    }
+}
+
+/// How long an answer from a container runtime is reused when nothing about
+/// the listening ports has changed. Long enough that a quiet machine stops
+/// paying for it; short enough to catch a container swapped in on the port its
+/// predecessor was using.
+const RUNTIME_INTERVAL: Duration = Duration::from_secs(60);
+
+/// How far up a parent chain is worth walking. A service started from a shell
+/// in a terminal in a session is three or four deep; anything past this is the
+/// machine's own furniture.
+const MAX_ANCESTRY: usize = 8;
+
+/// Whether an ancestor is a command somebody ran, rather than the scaffolding
+/// every process on the machine shares.
+///
+/// A shell, a terminal, `launchd` and `init` are ancestors of everything, so
+/// grouping by them would put the whole machine in one bucket and say nothing.
+fn worth_grouping_by(i: &ProcInfo) -> bool {
+    const FURNITURE: &[&str] = &[
+        "launchd",
+        "init",
+        "systemd",
+        "sh",
+        "bash",
+        "zsh",
+        "fish",
+        "dash",
+        "ksh",
+        "tcsh",
+        "csh",
+        "login",
+        "sshd",
+        "tmux",
+        "screen",
+        "Terminal",
+        "iTerm2",
+        "WindowServer",
+        "kernel_task",
+        "alacritty",
+        "kitty",
+        "ghostty",
+        "wezterm",
+        "gnome-terminal",
+        "konsole",
+        "code",
+        "Code",
+        "containerd-shim",
+        "cursor",
+        "Cursor",
+    ];
+    let name = i
+        .name
+        .rsplit(std::path::MAIN_SEPARATOR)
+        .next()
+        .unwrap_or(&i.name);
+    !name.is_empty() && !FURNITURE.iter().any(|f| name.eq_ignore_ascii_case(f))
+}
+
+/// One sweep of the socket source, grouped by the process holding each socket.
+struct Listening {
+    holders: BTreeMap<u32, Holder>,
+    warnings: Vec<String>,
+    /// True when the machine had more listening sockets than quarry will show.
+    truncated: bool,
+}
+
+/// Every socket one process is holding, with what little the socket source
+/// knew about the process itself.
+#[derive(Default)]
+struct Holder {
+    command: String,
+    user: String,
+    listeners: Vec<Listener>,
 }
 
 /// What a service is, and why.

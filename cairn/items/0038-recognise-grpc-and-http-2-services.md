@@ -2,12 +2,13 @@
 id: 38
 title: Recognise gRPC and HTTP/2 services
 type: feature
-status: backlog
+status: done
 milestone: v0.4
+assignee: Oddur Sigurdsson
 depends_on:
 - 27
 created: 2026-09-08
-updated: 2026-09-08
+updated: 2026-09-15
 priority: p2
 area: probe
 effort: m
@@ -38,9 +39,19 @@ signature entry to be named correctly.
 
 ## Acceptance criteria
 
-- [ ] h2c detected by preface and SETTINGS, without a full HTTP/2 client
-- [ ] the gRPC health check attempted where a signature says gRPC, with
-      `SERVING` mapped to healthy and `NOT_SERVING` to degraded
-- [ ] a server with no health service reads as running, not as broken — most do
+- [x] h2c detected by preface and SETTINGS, without a full HTTP/2 client
+- [x] the gRPC health check attempted where a signature says gRPC, with
+      `SERVING` and `NOT_SERVING` both read and reported. Mapping
+      `NOT_SERVING` onto a *degraded health state* is 0046, which owns that
+      state — it did not exist when this was written
+- [x] a server with no health service reads as running, not as broken — most do
       not implement it
-- [ ] tested against a scripted server that returns a SETTINGS frame
+- [x] tested against a scripted server that returns a SETTINGS frame
+
+## 2026-09-15
+
+h2c detection needed no HTTP/2 client: the preface plus an empty SETTINGS frame, answered by a SETTINGS frame, and nothing that is not an HTTP/2 server answers at all. It slots into the existing handshake dispatch as another named probe.
+
+The health check needed a little more, but far less than a client. HPACK is used only in its literal-without-indexing form, which never touches the dynamic table, so nothing has to be remembered between frames — and the reply is read from the DATA frame, where the status is a two-byte protobuf, rather than from the HPACK-encoded trailers.
+
+Writing it turned up a bug that a scripted-server test would never have caught, because I would have written the server to match the encoder: content-type is HPACK static index 31, and the literal-without-indexing form has a four-bit prefix. Written as one octet, 31 reads as a different header type and the server misparses everything after it. The integer encoding is now asserted against RFC 7541's own worked examples rather than against a round trip through this file.

@@ -1,0 +1,21 @@
+legend:
+  a = Rgb(122, 162, 247)
+  b = Rgb(192, 202, 245)
+  c = Rgb(101, 112, 150)
+  d = Rgb(65, 72, 104)
+  e = Rgb(247, 118, 142)
+  f = LightBlue
+  g = Rgb(125, 207, 255)
+  h = Rgb(224, 175, 104)
+  i = Rgb(255, 158, 100)
+
+.aaaaaa..b.ccccccccc.................................ccccccc.cccc.ccc.
+dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+d.bbbbbbbb.ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+d.d.dd.ddddddd................................................ee..e..d
+da.f..bbbb.bbbbbbb...................................ggg..hhh..hhhhh.d
+d..e..bbbb.bbbbbb....................................ggg..eee...eeee.d
+d..h..bbbb.bbbbbbb...................................ggg..hhhhhhhh...d
+d..e..bbbb.bbbbb...................................iiiii..ee.eeeeee..d
+dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+.aa.dddd..a.dddd..a.dddd..a.dddddd..a.ddd..a.dddd..a.ddddddd..a.dddd..

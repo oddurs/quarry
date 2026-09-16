@@ -1,0 +1,62 @@
+# A stack for proving the taxonomy against software that actually exists.
+#
+# One service per kind quarry claims to know, on its conventional port. Every
+# image is an official one pinned to a major version: the point is to check
+# quarry against what people run, so tracking `latest` would mean the test
+# changes meaning without the repository changing.
+#
+# Nothing here holds data. No volumes, no persistence, no credentials worth
+# having — a stack that is brought up, scanned, and thrown away.
+name: quarry-taxonomy
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: quarry
+    ports: ["55432:5432"]
+
+  redis:
+    image: redis:7-alpine
+    ports: ["56379:6379"]
+
+  mongodb:
+    image: mongo:7
+    ports: ["57017:27017"]
+
+  memcached:
+    image: memcached:1-alpine
+    ports: ["51211:11211"]
+
+  rabbitmq:
+    image: rabbitmq:3-alpine
+    ports: ["55672:5672"]
+
+  minio:
+    # quay, not Docker Hub: `minio/minio` there refuses anonymous pulls.
+    image: quay.io/minio/minio:latest
+    command: server /data
+    ports: ["59000:9000"]
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    ports: ["53000:3000"]
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    ports: ["59090:9090"]
+
+  mailpit:
+    image: axllent/mailpit:v1.21
+    ports: ["58025:8025"]
+
+  nginx:
+    image: nginx:1-alpine
+    ports: ["58080:80"]
+
+  # A real gRPC server. The h2c detection and the health check in 0038 were
+  # written against a scripted server and this is the first thing that puts
+  # them in front of an implementation somebody else wrote.
+  grpc:
+    image: moul/grpcbin:latest
+    ports: ["59001:9000"]

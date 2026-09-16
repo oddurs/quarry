@@ -27,6 +27,153 @@ fn loaded() -> App {
     app
 }
 
+/// The `--here` view: one repository, its worktrees as the groups.
+#[test]
+fn scoped_to_one_repository() {
+    let mut app = App::new();
+    app.ingest(vec![
+        testkit::server(3000, "node")
+            .cmdline("next-server (v16.3.4)")
+            .repo("acme-web", "main")
+            .kind(quarry::model::Kind::Web)
+            .health(quarry::testkit::served(
+                200,
+                9,
+                Some("Acme — Dashboard"),
+                Some("Next.js"),
+            ))
+            .build(),
+        testkit::server(3001, "node")
+            .cmdline("next-server (v16.3.4)")
+            .worktree("acme-web", "feat/billing")
+            .kind(quarry::model::Kind::Web)
+            .health(quarry::testkit::served(200, 14, None, Some("Next.js")))
+            .build(),
+        testkit::server(5432, "postgres")
+            .cmdline("postgres -D /var/lib/postgresql")
+            .worktree("acme-web", "feat/billing")
+            .kind(quarry::model::Kind::Database)
+            .service("PostgreSQL")
+            .build(),
+        // Somewhere else entirely; it must not appear.
+        testkit::server(4000, "node")
+            .cmdline("node server.js")
+            .repo("unrelated", "main")
+            .kind(quarry::model::Kind::Web)
+            .build(),
+    ]);
+    app.scope = Some(quarry::model::Scope {
+        root: std::path::PathBuf::from("/src/acme-web"),
+        name: "acme-web".into(),
+        remote: Some("acme/acme-web".into()),
+    });
+    app.here = true;
+    app.rebuild();
+    app.now = NOW;
+    app.theme = Theme::resolve(SNAPSHOT_THEME).expect("the snapshot theme resolves");
+    assert_snapshot("scoped", &ui::render_to_string(&mut app, 118, 26, 0));
+}
+
+/// `tab` gives the list the whole width.
+#[test]
+fn without_the_detail_pane() {
+    let mut app = loaded();
+    app.detail = false;
+    assert_snapshot("no_detail", &ui::render_to_string(&mut app, 118, 16, 0));
+}
+
+/// And a terminal too narrow to afford both drops it without being asked —
+/// half of eighty columns is not enough for either pane.
+#[test]
+fn a_narrow_terminal_drops_the_detail_pane() {
+    let mut app = loaded();
+    let screen = ui::render_to_string(&mut app, 84, 16, 0);
+    assert!(
+        !screen.contains("Detail"),
+        "the detail pane survived a terminal that cannot afford it:\n{screen}"
+    );
+    assert!(screen.contains("Services"), "{screen}");
+}
+
+/// The latency was measured either way; a blank column read as "not checked".
+#[test]
+fn a_non_http_service_still_shows_what_it_cost() {
+    let mut app = loaded();
+    let screen = ui::render_to_string(&mut app, 118, 20, 0);
+    let line = screen
+        .lines()
+        .find(|l| l.contains("5432"))
+        .expect("the postgres row");
+    assert!(line.contains("open"), "{line}");
+    assert!(
+        line.chars().any(|c| c.is_ascii_digit()) && line.contains("ms"),
+        "no latency beside `open`: {line}"
+    );
+}
+
+/// Grouped by kind: every database together, whatever project it came from.
+#[test]
+fn grouped_by_kind() {
+    let mut app = loaded();
+    app.group_by = quarry::model::GroupBy::Kind;
+    app.rebuild();
+    assert_snapshot("by_kind", &ui::render_to_string(&mut app, 118, 16, 0));
+}
+
+/// One flat list, newest first — no headings at all, and the pane says so.
+#[test]
+fn flat_and_newest_first() {
+    let mut app = loaded();
+    app.group_by = quarry::model::GroupBy::Nothing;
+    app.sort_by = quarry::model::SortBy::Newest;
+    app.rebuild();
+    assert_snapshot("flat", &ui::render_to_string(&mut app, 118, 14, 0));
+}
+
+/// 0035 — the states that are neither working nor broken, in every theme, so
+/// the distinction is checked where it has to survive: `mono`, which has no
+/// colour at all, and `auto`, which has no palette of its own.
+#[test]
+fn the_in_between_states_in_every_theme() {
+    use quarry::model::{Health, Kind};
+    for name in ["auto", "mono", "gotham", "night", "paper"] {
+        let mut app = App::new();
+        app.ingest(vec![
+            testkit::server(3000, "node")
+                .service("Next.js")
+                .kind(Kind::Web)
+                .health(Health::Starting)
+                .build(),
+            testkit::server(3001, "node")
+                .service("Grafana")
+                .kind(Kind::Web)
+                .health(testkit::status(403, 4))
+                .build(),
+            testkit::server(3002, "node")
+                .service("Jaeger")
+                .kind(Kind::Web)
+                .health(testkit::status(503, 41))
+                .build(),
+            testkit::server(3003, "redis")
+                .service("Redis")
+                .kind(Kind::Cache)
+                .health(Health::Closed)
+                .build(),
+        ]);
+        app.detail = false;
+        app.now = NOW;
+        app.theme = Theme::resolve(name).expect("a built-in theme resolves");
+        assert_snapshot(
+            &format!("states_{name}"),
+            &ui::render_to_string(&mut app, 70, 10, 0),
+        );
+        assert_snapshot(
+            &format!("states_colours_{name}"),
+            &ui::render_styles_to_string(&mut app, 70, 10, 0),
+        );
+    }
+}
+
 #[test]
 fn standard_screen() {
     let mut app = loaded();
@@ -187,7 +334,7 @@ fn help_overlay() {
 #[test]
 fn confirm_overlay() {
     let mut app = loaded();
-    app.ask_kill(false);
+    app.ask(quarry::lifecycle::Op::Stop);
     assert_snapshot("confirm", &ui::render_to_string(&mut app, 100, 20, 0));
 }
 
@@ -386,4 +533,124 @@ fn footer_hints_drop_whole_rather_than_clipping() {
             }
         }
     }
+}
+
+/// Responsive: a column belongs to the frame, not to a row.
+///
+/// The failure this guards against is subtle and was real — `mail` is four
+/// characters and `metrics` is seven, so at a width where one fitted and the
+/// other did not, one row kept its kind and the next lost it, and the columns
+/// stopped lining up down the page.
+#[test]
+fn every_row_shows_the_same_columns_at_every_width() {
+    for width in 28..=160u16 {
+        let mut app = loaded();
+        let screen = ui::render_to_string(&mut app, width, 16, 0);
+        // Service rows only: a group heading carries `✕` in its trouble count
+        // and is a different shape entirely.
+        let rows: Vec<&str> = screen
+            .lines()
+            .filter(|l| !l.contains('▾') && !l.contains('▸'))
+            .filter(|l| l.chars().any(|c| "●○✕▲◆◌◍".contains(c)))
+            .collect();
+        assert!(!rows.is_empty(), "no service rows at {width}");
+
+        // The kind is shown for every row or for none. Asserted on the column
+        // rather than on the text, because `mail` is four characters and
+        // `metrics` is seven — which is exactly how it used to go wrong.
+        let kinds = [
+            "web", "api", "db", "cache", "mail", "metrics", "tunnel", "queue",
+        ];
+        let has_kind: Vec<bool> = rows
+            .iter()
+            .map(|r| kinds.iter().any(|k| r.contains(&format!(" {k}  "))))
+            .collect();
+        assert!(
+            has_kind.windows(2).all(|w| w[0] == w[1]),
+            "at {width} columns some rows show their kind and some do not:\n{}",
+            rows.join("\n")
+        );
+    }
+}
+
+/// Nothing may overflow, at any width a terminal can be. Lines may be shorter
+/// — `render_to_string` trims the trailing spaces — but never longer.
+#[test]
+fn the_frame_fits_at_every_width() {
+    for width in 20..=200u16 {
+        let mut app = loaded();
+        for line in ui::render_to_string(&mut app, width, 14, 0).lines() {
+            assert!(
+                line.chars().count() <= width as usize,
+                "a line overflows at {width} columns: {line:?}"
+            );
+        }
+    }
+}
+
+/// The title bar draws two things over one line — the identity on the left and
+/// the clock on the right — and drawing them independently made them collide:
+/// at twenty columns the clock was painted straight through `quarry`.
+#[test]
+fn the_title_bar_never_paints_over_itself() {
+    for width in 20..=200u16 {
+        let mut app = loaded();
+        let screen = ui::render_to_string(&mut app, width, 8, 0);
+        let title = screen.lines().next().expect("a title bar");
+        assert!(
+            title.starts_with(" quarry"),
+            "at {width} columns the title bar is {title:?}"
+        );
+        // The clock is there in full or not at all, never half-painted.
+        if title.contains("updated") {
+            assert!(
+                title.ends_with("just now") || title.contains(" ago "),
+                "at {width} columns the clock is cut: {title:?}"
+            );
+        }
+    }
+}
+
+/// The detail pane appears only when the list can still show a complete row —
+/// on a narrow terminal the list is the tool.
+#[test]
+fn the_detail_pane_gives_way_before_the_list_does() {
+    for width in 20..=93u16 {
+        let mut app = loaded();
+        let screen = ui::render_to_string(&mut app, width, 12, 0);
+        assert!(
+            !screen.contains("Detail"),
+            "the detail pane is still there at {width} columns"
+        );
+    }
+    let mut app = loaded();
+    assert!(ui::render_to_string(&mut app, 94, 12, 0).contains("Detail"));
+}
+
+/// Beyond what a row needs, the spare width goes to the pane that can use it.
+#[test]
+fn a_wide_terminal_gives_its_room_to_the_detail_pane() {
+    // Both wide enough for the list to have reached its full width, so any
+    // further room is genuinely spare.
+    let mut app = loaded();
+    let narrow = ui::render_to_string(&mut app, 124, 12, 0);
+    let wide = ui::render_to_string(&mut app, 170, 12, 0);
+
+    let pane_width = |screen: &str, title: &str| {
+        let line = screen
+            .lines()
+            .find(|l| l.contains(title))
+            .expect("the pane's title");
+        let at = line.find(title).expect("the title");
+        line[at..].chars().take_while(|c| *c != '╮').count()
+    };
+    assert_eq!(
+        pane_width(&narrow, " Services "),
+        pane_width(&wide, " Services "),
+        "the list grew instead of the detail pane"
+    );
+    assert!(
+        pane_width(&wide, " Detail ") > pane_width(&narrow, " Detail "),
+        "the detail pane did not take the extra room"
+    );
 }

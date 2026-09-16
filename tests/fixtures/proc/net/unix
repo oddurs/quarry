@@ -1,0 +1,4 @@
+Num       RefCount Protocol Flags    Type St Inode Path
+ffff9e0a: 00000002 00000000 00010000 0001 01 41008 /run/user/1000/docker.sock
+ffff9e0b: 00000003 00000000 00000000 0001 03 41009 /run/user/1000/docker.sock
+ffff9e0c: 00000002 00000000 00010000 0001 01 41010 @/tmp/.X11-unix/X0
