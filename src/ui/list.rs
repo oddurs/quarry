@@ -73,7 +73,7 @@ pub(super) fn draw_list(f: &mut Frame, app: &mut App, t: &Theme, area: Rect) {
         .iter()
         .filter_map(|r| match r {
             Row::Server(i) => Some(app.servers[*i].primary_column().chars().count()),
-            Row::Group(_) => None,
+            Row::Group(_) | Row::Launcher(_) => None,
         })
         .max()
         .unwrap_or(PORT_WIDTH)
@@ -96,6 +96,7 @@ pub(super) fn draw_list(f: &mut Frame, app: &mut App, t: &Theme, area: Rect) {
             let row_width = inner_width.min(ROW_MAX);
             let line = match row {
                 Row::Group(g) => group_line(app, t, *g, row_width, selected),
+                Row::Launcher(l) => launcher_line(app, t, *l, row_width, selected),
                 Row::Server(s) => server_line(
                     &app.servers[*s],
                     t,
@@ -279,6 +280,26 @@ const FRESH: Duration = Duration::from_secs(30);
 /// Has this appeared recently enough to still be worth pointing at?
 fn is_fresh(s: &Server) -> bool {
     s.appeared.is_some_and(|at| at.elapsed() < FRESH)
+}
+
+/// A command several services beneath it came from, indented under its
+/// project. The count is the point: nine things from one command stop
+/// together, and this is the one process to stop.
+fn launcher_line(app: &App, t: &Theme, idx: usize, width: usize, selected: bool) -> Line<'static> {
+    let l = &app.launchers[idx];
+    let right = format!("{} ", l.count);
+    let name = format!("↳ {}", l.command);
+    // Two for the gutter and the arrival column, one for the trailing space.
+    let budget = width.saturating_sub(4 + right.chars().count());
+    let name = truncate(&name, budget);
+    let pad = budget.saturating_sub(name.chars().count());
+    Line::from(vec![
+        gutter(selected, t),
+        Span::raw("   "),
+        Span::styled(name, Style::default().fg(t.muted)),
+        Span::raw(" ".repeat(pad)),
+        Span::styled(right, Style::default().fg(t.faint)),
+    ])
 }
 
 fn server_line(

@@ -16,6 +16,11 @@ use crate::theme::Theme;
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Row {
     Group(usize),
+    /// A command that started several of the services beneath it. Nested
+    /// inside its project rather than replacing it: both facts are true, and
+    /// which repository something belongs to does not stop mattering because
+    /// you also know what launched it.
+    Launcher(usize),
     Server(usize),
 }
 
@@ -54,6 +59,13 @@ pub enum ToastKind {
     Bad,
 }
 
+/// A command several services on screen came from.
+pub struct LauncherRow {
+    pub pid: u32,
+    pub command: String,
+    pub count: usize,
+}
+
 pub struct Group {
     pub key: String,
     pub source: GroupSource,
@@ -90,6 +102,9 @@ pub enum PendingAction {
 pub struct App {
     pub servers: Vec<Server>,
     pub groups: Vec<Group>,
+    /// Subgroups, in the order they appear. Flat rather than nested under
+    /// `groups`: a row indexes one of these directly, as it does a group.
+    pub launchers: Vec<LauncherRow>,
     pub rows: Vec<Row>,
     /// Which group each server belongs to, by server index. Rebuilt with the
     /// rows, so a health update can adjust one counter instead of re-deriving
@@ -164,6 +179,7 @@ impl App {
         Self {
             servers: Vec::new(),
             groups: Vec::new(),
+            launchers: Vec::new(),
             rows: Vec::new(),
             group_of: Vec::new(),
             by_pid: HashMap::new(),
@@ -439,6 +455,7 @@ impl App {
                 self.selected = idx;
                 self.toggle_group();
             }
+            Some(Row::Launcher(_)) => self.selected = idx,
             None => {}
         }
     }
@@ -477,12 +494,24 @@ impl App {
         let order = self.ordering(&keys);
 
         self.groups.clear();
+        self.launchers.clear();
         self.rows.clear();
         self.group_of.clear();
         self.group_of.resize(self.servers.len(), usize::MAX);
 
+        // How many services in each group came from each command. A launcher
+        // that started one of them within this group is not a subgroup — it
+        // says nothing the service did not already say.
+        let mut shared: HashMap<(&str, u32), usize> = HashMap::new();
+        for i in &order {
+            if let Some(l) = &self.servers[*i].launcher {
+                *shared.entry((keys[*i].as_str(), l.pid)).or_default() += 1;
+            }
+        }
+
         let flat = self.group_by == GroupBy::Nothing;
         let mut current: Option<&str> = None;
+        let mut current_launcher: Option<u32> = None;
         for i in order {
             let key = keys[i].as_str();
             // Flat means no headings at all, not one heading over everything.
@@ -494,6 +523,7 @@ impl App {
                 self.groups.push(self.heading(i, &keys));
                 self.rows.push(Row::Group(self.groups.len() - 1));
                 current = Some(key);
+                current_launcher = None;
             }
             let group_idx = self.groups.len() - 1;
             self.group_of[i] = group_idx;
@@ -502,9 +532,28 @@ impl App {
             if self.servers[i].health.is_trouble() {
                 g.trouble += 1;
             }
-            if !self.collapsed.contains(key) {
-                self.rows.push(Row::Server(i));
+            if self.collapsed.contains(key) {
+                continue;
             }
+
+            let launcher = self.servers[i]
+                .launcher
+                .as_ref()
+                .filter(|l| shared.get(&(key, l.pid)).is_some_and(|n| *n > 1));
+            match launcher {
+                Some(l) if current_launcher != Some(l.pid) => {
+                    self.launchers.push(LauncherRow {
+                        pid: l.pid,
+                        command: l.command.clone(),
+                        count: shared[&(key, l.pid)],
+                    });
+                    self.rows.push(Row::Launcher(self.launchers.len() - 1));
+                    current_launcher = Some(l.pid);
+                }
+                Some(_) => {}
+                None => current_launcher = None,
+            }
+            self.rows.push(Row::Server(i));
         }
         self.clamp();
     }
@@ -615,6 +664,9 @@ impl App {
     fn is_selectable(&self, idx: usize) -> bool {
         match self.rows.get(idx) {
             Some(Row::Server(_)) => true,
+            // A launcher is landable so that it can be stopped: it is the one
+            // process that takes everything under it down with it.
+            Some(Row::Launcher(_)) => true,
             Some(Row::Group(g)) => self
                 .groups
                 .get(*g)
@@ -642,11 +694,19 @@ impl App {
             .find(|i| self.is_selectable(*i))
     }
 
+    /// The launcher under the cursor, when the cursor is on one.
+    pub fn selected_launcher(&self) -> Option<&LauncherRow> {
+        match self.rows.get(self.selected)? {
+            Row::Launcher(l) => self.launchers.get(*l),
+            _ => None,
+        }
+    }
+
     /// The group under the cursor, when the cursor is on a header.
     pub fn selected_group(&self) -> Option<&Group> {
         match self.rows.get(self.selected)? {
             Row::Group(g) => self.groups.get(*g),
-            Row::Server(_) => None,
+            Row::Server(_) | Row::Launcher(_) => None,
         }
     }
 
@@ -668,7 +728,7 @@ impl App {
     pub fn selected_server(&self) -> Option<&Server> {
         match self.rows.get(self.selected)? {
             Row::Server(i) => self.servers.get(*i),
-            Row::Group(_) => None,
+            Row::Group(_) | Row::Launcher(_) => None,
         }
     }
 
@@ -703,7 +763,8 @@ impl App {
         let key = match self.rows.get(self.selected) {
             Some(Row::Group(g)) => self.groups[*g].key.clone(),
             Some(Row::Server(i)) => self.servers[*i].group_key(),
-            None => return,
+            // A launcher is not foldable; it is a heading you can act on.
+            Some(Row::Launcher(_)) | None => return,
         };
         let collapsing = !self.collapsed.contains(&key);
         if collapsing {
@@ -808,7 +869,7 @@ impl App {
         let n = self.rows.len();
         let broken = |row: &Row| match row {
             Row::Server(i) => self.servers[*i].health.is_trouble(),
-            Row::Group(_) => false,
+            Row::Group(_) | Row::Launcher(_) => false,
         };
         // From the row after this one, so repeated presses walk the list
         // rather than sticking on whatever is already selected.
@@ -913,6 +974,25 @@ impl App {
             Op::Restart => "Restart",
             Op::Kill => "Force kill",
         };
+        // The one process that takes everything under it down with it. That
+        // is the whole reason a launcher is worth showing.
+        if let Some(launcher) = self.selected_launcher() {
+            let (pid, command, count) = (launcher.pid, launcher.command.clone(), launcher.count);
+            self.confirm = Some(Confirm {
+                prompt: format!("{verb} {command}?"),
+                detail: format!(
+                    "the command {} started, and {} with it",
+                    plural(count, "service", "services"),
+                    if count == 1 { "it goes" } else { "they go" }
+                ),
+                action: PendingAction::Lifecycle {
+                    targets: vec![Target::Process { pid, port: None }],
+                    op,
+                },
+            });
+            return;
+        }
+
         // A group heading is a selection too, and a worktree is a unit people
         // think in: "restart this branch" rather than four rows in turn.
         if let Some(group) = self.selected_group() {

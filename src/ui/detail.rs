@@ -335,6 +335,12 @@ fn detail_process(s: &Server, t: &Theme, now: u64) -> Vec<Line<'static>> {
         t,
     ));
     lines.extend(s.ppid.map(|ppid| kv("parent", &ppid.to_string(), t)));
+    // The command this came from, where it started more than this one thing.
+    lines.extend(
+        s.launcher
+            .as_ref()
+            .map(|l| kv("started by", &format!("{} (pid {})", l.command, l.pid), t)),
+    );
     lines.extend(
         s.exe
             .as_ref()

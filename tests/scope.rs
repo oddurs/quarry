@@ -11,7 +11,7 @@ fn on_screen(app: &App) -> Vec<u16> {
         .iter()
         .filter_map(|r| match r {
             Row::Server(i) => Some(app.servers[*i].primary_port()),
-            Row::Group(_) => None,
+            Row::Group(_) | Row::Launcher(_) => None,
         })
         .collect()
 }

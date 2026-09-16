@@ -12,7 +12,7 @@ fn ports(app: &App) -> Vec<u16> {
         .iter()
         .filter_map(|r| match r {
             Row::Server(i) => Some(app.servers[*i].primary_port()),
-            Row::Group(_) => None,
+            Row::Group(_) | Row::Launcher(_) => None,
         })
         .collect()
 }
@@ -1017,5 +1017,176 @@ mod tunnels {
         app.ingest(vec![server(3000, "node").service("Next.js").build()]);
         let screen = quarry::ui::render_to_string(&mut app, 100, 24, 0);
         assert!(!screen.contains('⇡'), "{screen}");
+    }
+}
+
+/// 0040 — `turbo dev`, `overmind` or a plain script starts five or ten servers
+/// at once, and quarry showed ten rows with nothing saying they came from one
+/// command and stop together.
+mod process_tree {
+    use super::*;
+    use quarry::app::Row;
+    use quarry::model::Launcher;
+
+    fn from(commands: &[(u16, Option<(u32, &str)>)]) -> App {
+        let mut app = App::new();
+        app.ingest(
+            commands
+                .iter()
+                .map(|(port, launcher)| {
+                    let mut s = server(*port, "node")
+                        .repo("acme-web", "main")
+                        .kind(Kind::Web)
+                        .service("Next.js")
+                        .build();
+                    s.launcher = launcher.map(|(pid, command)| Launcher {
+                        pid,
+                        command: command.to_string(),
+                    });
+                    s
+                })
+                .collect(),
+        );
+        app
+    }
+
+    fn shape(app: &App) -> Vec<String> {
+        app.rows
+            .iter()
+            .map(|r| match r {
+                Row::Group(g) => format!("group {}", app.groups[*g].key),
+                Row::Launcher(l) => format!("launcher {}", app.launchers[*l].command),
+                Row::Server(i) => format!("  {}", app.servers[*i].primary_port()),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn services_from_one_command_are_gathered_under_it() {
+        let app = from(&[
+            (3000, Some((900, "turbo dev"))),
+            (3001, Some((900, "turbo dev"))),
+            (5432, None),
+        ]);
+        assert_eq!(
+            shape(&app),
+            vec![
+                "group acme-web",
+                "launcher turbo dev",
+                "  3000",
+                "  3001",
+                "  5432",
+            ]
+        );
+        assert_eq!(app.launchers[0].count, 2);
+    }
+
+    /// An ancestor that started one thing says nothing the thing did not.
+    #[test]
+    fn one_service_is_not_a_subgroup() {
+        let app = from(&[(3000, Some((900, "turbo dev"))), (5432, None)]);
+        assert!(
+            !shape(&app).iter().any(|r| r.starts_with("launcher")),
+            "{:?}",
+            shape(&app)
+        );
+    }
+
+    /// It nests inside the project rather than replacing it: which repository
+    /// something belongs to does not stop mattering.
+    #[test]
+    fn the_project_is_still_the_outer_grouping() {
+        let app = from(&[
+            (3000, Some((900, "turbo dev"))),
+            (3001, Some((900, "turbo dev"))),
+        ]);
+        assert_eq!(
+            shape(&app).first().map(String::as_str),
+            Some("group acme-web")
+        );
+    }
+
+    /// The whole reason it is worth showing: one process takes the rest down.
+    #[test]
+    fn the_launcher_can_be_stopped_and_says_what_that_costs() {
+        let mut app = from(&[
+            (3000, Some((900, "turbo dev"))),
+            (3001, Some((900, "turbo dev"))),
+        ]);
+        app.selected = app
+            .rows
+            .iter()
+            .position(|r| matches!(r, Row::Launcher(_)))
+            .expect("a launcher row");
+
+        app.ask(quarry::lifecycle::Op::Stop);
+        let confirm = app.confirm.as_ref().expect("a confirmation");
+        assert!(confirm.prompt.contains("turbo dev"), "{}", confirm.prompt);
+        assert!(confirm.detail.contains('2'), "{}", confirm.detail);
+
+        match app.resolve_confirm(true) {
+            quarry::app::Action::Lifecycle { targets, .. } => {
+                assert_eq!(targets.len(), 1, "one process, not one per service");
+                assert!(
+                    matches!(
+                        targets[0],
+                        quarry::lifecycle::Target::Process { pid: 900, .. }
+                    ),
+                    "{:?}",
+                    targets[0]
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_detail_pane_names_the_command_that_started_it() {
+        let mut app = from(&[
+            (3000, Some((900, "turbo dev"))),
+            (3001, Some((900, "turbo dev"))),
+        ]);
+        app.selected = app
+            .rows
+            .iter()
+            .position(|r| matches!(r, Row::Server(_)))
+            .expect("a service row");
+        let screen = quarry::ui::render_to_string(&mut app, 100, 40, 0);
+        assert!(screen.contains("started by"), "{screen}");
+        assert!(screen.contains("turbo dev"), "{screen}");
+    }
+
+    /// A launcher row is a heading you can act on, not one you can fold.
+    #[test]
+    fn a_launcher_is_not_foldable() {
+        let mut app = from(&[
+            (3000, Some((900, "turbo dev"))),
+            (3001, Some((900, "turbo dev"))),
+        ]);
+        let at = app
+            .rows
+            .iter()
+            .position(|r| matches!(r, Row::Launcher(_)))
+            .expect("a launcher row");
+        app.selected = at;
+        let before = app.rows.len();
+        app.toggle_group();
+        assert_eq!(
+            app.rows.len(),
+            before,
+            "folding a launcher changed the list"
+        );
+    }
+
+    /// Folding the project takes its subgroups with it.
+    #[test]
+    fn folding_the_project_hides_the_launcher_too() {
+        let mut app = from(&[
+            (3000, Some((900, "turbo dev"))),
+            (3001, Some((900, "turbo dev"))),
+        ]);
+        app.collapsed.insert("acme-web".to_string());
+        app.rebuild();
+        assert_eq!(shape(&app), vec!["group acme-web"]);
     }
 }

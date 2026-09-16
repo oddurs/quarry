@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 
 use crate::diag;
-use crate::model::{Kind, Listener, Rules, Server, classify};
+use crate::model::{Kind, Launcher, Listener, Rules, Server, classify};
 use crate::repo::Resolver;
 use crate::signature::{Evidence, Registry, Verdict};
 use crate::source::{CwdSource, ProcInfo, ProcessSource, SocketSource, SourceError};
@@ -135,12 +135,14 @@ impl Engine {
         self.tunnels = crate::tunnel::Tunnels::query();
 
         let found = self.listening()?;
-        let info = self.process_table(found.holders.keys().copied().collect());
+        let pids: Vec<u32> = found.holders.keys().copied().collect();
+        let info = self.process_table(pids.clone());
+        let launchers = self.launchers(&pids, &info);
 
         let mut servers: Vec<Server> = found
             .holders
             .into_iter()
-            .filter_map(|(pid, holder)| self.assemble(pid, holder, &info))
+            .filter_map(|(pid, holder)| self.assemble(pid, holder, &info, &launchers))
             .collect();
         servers.sort_by(|a, b| {
             a.group_key()
@@ -219,6 +221,86 @@ impl Engine {
         info
     }
 
+    /// The command that started each service, where several share one.
+    ///
+    /// `turbo dev`, `overmind`, a Procfile or a plain shell script routinely
+    /// start five or ten servers at once, and in a monorepo they do not even
+    /// share a working directory. The value is not tidiness: knowing that nine
+    /// things came from one command tells you they stop together, and which
+    /// single process to stop.
+    fn launchers(
+        &mut self,
+        pids: &[u32],
+        info: &BTreeMap<u32, ProcInfo>,
+    ) -> BTreeMap<u32, Launcher> {
+        // The parent chain of every service, walked once. Only the listening
+        // pids have been looked up so far, so each generation is fetched as a
+        // batch rather than one process at a time.
+        let mut parents: BTreeMap<u32, ProcInfo> = BTreeMap::new();
+        let mut frontier: Vec<u32> = pids
+            .iter()
+            .filter_map(|pid| info.get(pid).and_then(|i| i.ppid))
+            .filter(|ppid| *ppid > 1)
+            .collect();
+
+        for _ in 0..MAX_ANCESTRY {
+            frontier.sort_unstable();
+            frontier.dedup();
+            frontier.retain(|pid| !parents.contains_key(pid));
+            if frontier.is_empty() {
+                break;
+            }
+            self.procs.refresh(&frontier);
+            let mut next = Vec::new();
+            for pid in std::mem::take(&mut frontier) {
+                let Some(i) = self.procs.info(pid) else {
+                    continue;
+                };
+                if let Some(ppid) = i.ppid.filter(|p| *p > 1) {
+                    next.push(ppid);
+                }
+                parents.insert(pid, i);
+            }
+            frontier = next;
+        }
+
+        // For each service, the nearest ancestor worth naming.
+        let mut nearest: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
+        for pid in pids {
+            let mut at = info.get(pid).and_then(|i| i.ppid);
+            for _ in 0..MAX_ANCESTRY {
+                let Some(current) = at.filter(|p| *p > 1) else {
+                    break;
+                };
+                let Some(i) = parents.get(&current) else {
+                    break;
+                };
+                if worth_grouping_by(i) {
+                    nearest.entry(current).or_default().push(*pid);
+                    break;
+                }
+                at = i.ppid;
+            }
+        }
+
+        // An ancestor that started one service tells you nothing you did not
+        // already know from the service itself.
+        nearest
+            .into_iter()
+            .filter(|(_, children)| children.len() > 1)
+            .flat_map(|(ancestor, children)| {
+                let i = parents.get(&ancestor).cloned().unwrap_or_default();
+                let launcher = Launcher {
+                    pid: ancestor,
+                    command: crate::model::friendly_process(&i.name, &i.cmdline),
+                };
+                children
+                    .into_iter()
+                    .map(move |child| (child, launcher.clone()))
+            })
+            .collect()
+    }
+
     /// One process and its sockets, turned into the thing the screen shows.
     /// `None` for a process whose sockets all deduplicated away.
     fn assemble(
@@ -226,6 +308,7 @@ impl Engine {
         pid: u32,
         holder: Holder,
         info: &BTreeMap<u32, ProcInfo>,
+        launchers: &BTreeMap<u32, Launcher>,
     ) -> Option<Server> {
         let Holder {
             command,
@@ -319,6 +402,7 @@ impl Engine {
             serving: None,
             exposed,
             certificate: None,
+            launcher: launchers.get(&pid).cloned(),
             evidence: verdict.map(|v| v.reasons.clone()).unwrap_or_default(),
             container,
             started_at: i.started_at,
@@ -361,6 +445,57 @@ impl Engine {
                 .filter(|r| !is_package_prefix(&r.root)),
         }
     }
+}
+
+/// How far up a parent chain is worth walking. A service started from a shell
+/// in a terminal in a session is three or four deep; anything past this is the
+/// machine's own furniture.
+const MAX_ANCESTRY: usize = 8;
+
+/// Whether an ancestor is a command somebody ran, rather than the scaffolding
+/// every process on the machine shares.
+///
+/// A shell, a terminal, `launchd` and `init` are ancestors of everything, so
+/// grouping by them would put the whole machine in one bucket and say nothing.
+fn worth_grouping_by(i: &ProcInfo) -> bool {
+    const FURNITURE: &[&str] = &[
+        "launchd",
+        "init",
+        "systemd",
+        "sh",
+        "bash",
+        "zsh",
+        "fish",
+        "dash",
+        "ksh",
+        "tcsh",
+        "csh",
+        "login",
+        "sshd",
+        "tmux",
+        "screen",
+        "Terminal",
+        "iTerm2",
+        "WindowServer",
+        "kernel_task",
+        "alacritty",
+        "kitty",
+        "ghostty",
+        "wezterm",
+        "gnome-terminal",
+        "konsole",
+        "code",
+        "Code",
+        "containerd-shim",
+        "cursor",
+        "Cursor",
+    ];
+    let name = i
+        .name
+        .rsplit(std::path::MAIN_SEPARATOR)
+        .next()
+        .unwrap_or(&i.name);
+    !name.is_empty() && !FURNITURE.iter().any(|f| name.eq_ignore_ascii_case(f))
 }
 
 /// One sweep of the socket source, grouped by the process holding each socket.

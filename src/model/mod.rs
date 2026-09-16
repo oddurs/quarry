@@ -64,6 +64,8 @@ pub struct Server {
     pub exposed: Option<crate::tunnel::Exposure>,
     /// What it presented at the TLS handshake, where it speaks TLS.
     pub certificate: Option<crate::certificate::Certificate>,
+    /// The command that started this and at least one other service.
+    pub launcher: Option<Launcher>,
     /// The container behind this port, where the runtime published one.
     pub container: Option<crate::docker::Container>,
     pub started_at: u64,
@@ -380,4 +382,14 @@ fn is_anonymous_dir(path: &std::path::Path) -> bool {
         Some(home) if !home.is_empty() => path == std::path::Path::new(&home),
         _ => false,
     }
+}
+
+/// A command that started several of the services on screen.
+///
+/// Not tidiness: knowing that nine things came from one command tells you they
+/// stop together, and which single process to stop.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Launcher {
+    pub pid: u32,
+    pub command: String,
 }
