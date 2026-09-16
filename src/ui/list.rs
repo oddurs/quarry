@@ -334,15 +334,18 @@ fn server_line(
 
     let reserved = status.chars().count() + if show_badge { badge_cost } else { 0 };
     let name_width = avail.saturating_sub(reserved);
+    let doubt = usize::from(s.unconfirmed);
     let name = truncate(
         &s.service_name(),
         name_width
             .saturating_sub(GAP)
-            .saturating_sub(extra_ports.chars().count()),
+            .saturating_sub(extra_ports.chars().count())
+            .saturating_sub(doubt),
     );
     let pad = name_width
         .saturating_sub(name.chars().count())
-        .saturating_sub(extra_ports.chars().count());
+        .saturating_sub(extra_ports.chars().count())
+        .saturating_sub(doubt);
 
     let mut spans = vec![
         gutter(selected, t),
@@ -352,6 +355,12 @@ fn server_line(
         Span::styled(port, Style::default().fg(t.text).bold()),
         Span::raw(" "),
         Span::styled(name, Style::default().fg(t.text)),
+        // A name the socket did not confirm is a guess from the port number,
+        // and the row should not present it as anything more.
+        Span::styled(
+            if s.unconfirmed { "?" } else { "" },
+            Style::default().fg(t.client_error).bold(),
+        ),
         Span::styled(extra_ports, Style::default().fg(t.faint)),
         Span::raw(" ".repeat(pad)),
     ];

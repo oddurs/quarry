@@ -51,13 +51,12 @@ quarry sits open. A scan every six seconds that costs 111ms is a tool you
 
 ## v0.4 — First-class support for every kind of server
 
-`######····` 60% · 12 of 20 done
+`#######···` 65% · 13 of 20 done
 
 quarry sees listening TCP sockets, guesses what they are from a port table and a
 
 ### backlog
 
-- [ ] `0034` Speak the protocols that will not introduce themselves <sup>feature · p1 · probe</sup>
 - [ ] `0037` Read listening sockets from /proc on Linux <sup>feature · p1 · discovery</sup>
 - [ ] `0038` Recognise gRPC and HTTP/2 services <sup>feature · p2 · probe</sup>
 - [ ] `0039` Show a tunnel's public URL, not its local port <sup>feature · p2 · attribution</sup>
@@ -75,6 +74,7 @@ quarry sees listening TCP sockets, guesses what they are from a port table and a
 - [x] `0031` Decide the probe budget once banners and handshakes are in play <sup>spike · p0 · probe</sup>
 - [x] `0032` See UDP listeners <sup>feature · p1 · discovery</sup>
 - [x] `0033` Widen the taxonomy to the things people actually run <sup>feature · p1 · discovery</sup>
+- [x] `0034` Speak the protocols that will not introduce themselves <sup>feature · p1 · probe</sup>
 - [x] `0035` Tell a protected service from a broken one <sup>feature · p1 · probe</sup>
 - [x] `0036` Ask the health endpoint a service actually has <sup>feature · p1 · probe</sup>
 - [x] `0041` Copy something you can actually paste <sup>feature · p2 · chrome</sup>

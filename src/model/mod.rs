@@ -50,6 +50,12 @@ pub struct Server {
     pub banner: Option<Vec<u8>>,
     /// Why it was identified as it was, in the words the signature table used.
     pub evidence: Vec<String>,
+    /// True when a handshake for this service's protocol was run and the reply
+    /// was not the one that protocol gives. The name came from the port, and
+    /// the socket disagrees with it.
+    pub unconfirmed: bool,
+    /// The version the service volunteered, where its protocol offers one.
+    pub version: Option<String>,
     /// The container behind this port, where the runtime published one.
     pub container: Option<crate::docker::Container>,
     pub started_at: u64,

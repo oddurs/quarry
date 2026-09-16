@@ -90,6 +90,8 @@ pub fn server(port: u16, command: &str) -> ServerBuilder {
             handshake: None,
             banner: None,
             evidence: Vec::new(),
+            unconfirmed: false,
+            version: None,
             container: None,
             started_at: 1_700_000_000,
             appeared: None,

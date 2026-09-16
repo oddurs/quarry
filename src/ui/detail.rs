@@ -135,6 +135,24 @@ fn detail_health(s: &Server, t: &Theme) -> Vec<Line<'static>> {
             Span::styled(s.health.summary(), Style::default().fg(colour)),
         ]),
     ];
+    // The one sentence this is all for: the port said one thing and the socket
+    // said another, and only the port is still claiming it.
+    if s.unconfirmed {
+        lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled(
+                // Truncated: the pane is a fixed width and a long service
+                // name would otherwise wrap the sentence through the middle
+                // of a word, which reads as a rendering fault.
+                truncate(
+                    &format!("did not answer like {}", s.service_name()),
+                    DETAIL_WIDTH as usize - 4,
+                ),
+                Style::default().fg(t.client_error),
+            ),
+        ]));
+    }
+    lines.extend(s.version.as_deref().map(|v| kv("version", v, t)));
     if let Health::Http { server, title, .. } = &s.health {
         lines.extend(title.as_deref().map(|page| kv("page", page, t)));
         lines.extend(server.as_deref().map(|name| kv("server", name, t)));

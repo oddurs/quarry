@@ -296,6 +296,8 @@ impl Engine {
             note: signature.and_then(|s| s.note.clone()),
             handshake: signature.and_then(|s| s.probe.clone()),
             banner: None,
+            unconfirmed: false,
+            version: None,
             evidence: verdict.map(|v| v.reasons.clone()).unwrap_or_default(),
             container,
             started_at: i.started_at,

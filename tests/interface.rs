@@ -646,7 +646,7 @@ mod starting {
         // Two scans: the first is not news, so nothing is new in it.
         app.ingest(vec![server(9999, "other").build()]);
         app.ingest(build(&Health::Unknown));
-        app.apply_health(10_000 + 3000, 3000, health, None);
+        app.apply_health(10_000 + 3000, 3000, health, None, None);
         app
     }
 
@@ -707,7 +707,7 @@ mod starting {
                 s.appeared = at.checked_sub(Duration::from_secs(300));
             }
         }
-        app.apply_health(10_000 + 3000, 3000, Health::Closed, None);
+        app.apply_health(10_000 + 3000, 3000, Health::Closed, None, None);
         assert!(
             matches!(health_of(&app), Health::Closed),
             "{:?}",
@@ -726,7 +726,7 @@ mod starting {
                 .kind(Kind::Web)
                 .build(),
         ]);
-        app.apply_health(10_000 + 3000, 3000, Health::Closed, None);
+        app.apply_health(10_000 + 3000, 3000, Health::Closed, None, None);
         assert!(matches!(health_of(&app), Health::Closed));
     }
 
@@ -762,5 +762,80 @@ mod starting {
                 "{h:?} shares a glyph with another state"
             );
         }
+    }
+}
+
+/// 0034 — a port is a convention and a handshake is proof.
+mod handshakes {
+    use super::*;
+    use quarry::model::Health;
+
+    fn probed(confirmed: Option<bool>) -> App {
+        let mut app = App::new();
+        app.ingest(vec![
+            server(5432, "postgres")
+                .service("PostgreSQL")
+                .kind(Kind::Database)
+                .build(),
+        ]);
+        app.apply_health(
+            10_000 + 5432,
+            5432,
+            Health::Open {
+                latency: Duration::from_micros(200),
+            },
+            None,
+            confirmed,
+        );
+        app
+    }
+
+    fn only(app: &App) -> &Server {
+        app.servers.first().expect("the service")
+    }
+
+    /// Something else sitting on 5432 was reported as "PostgreSQL, healthy" on
+    /// the strength of the number alone.
+    #[test]
+    fn a_socket_that_did_not_answer_like_the_thing_is_marked() {
+        let app = probed(Some(false));
+        assert!(only(&app).unconfirmed);
+
+        let mut app = app;
+        let screen = quarry::ui::render_to_string(&mut app, 100, 20, 0);
+        assert!(
+            screen.contains("PostgreSQL?"),
+            "the list does not show the doubt:\n{screen}"
+        );
+        assert!(
+            screen.contains("did not answer like PostgreSQL"),
+            "the detail pane does not say what happened:\n{screen}"
+        );
+    }
+
+    #[test]
+    fn a_socket_that_answered_correctly_is_not_marked() {
+        let app = probed(Some(true));
+        assert!(!only(&app).unconfirmed);
+    }
+
+    /// No handshake named, nothing to disagree with.
+    #[test]
+    fn a_protocol_with_no_handshake_is_never_in_doubt() {
+        let app = probed(None);
+        assert!(!only(&app).unconfirmed);
+    }
+
+    /// "the socket is there, we just could not confirm what it is" — being
+    /// unable to prove it must not be reported as the service being down.
+    #[test]
+    fn failing_to_confirm_is_not_the_same_as_being_closed() {
+        let app = probed(Some(false));
+        assert!(
+            matches!(only(&app).health, Health::Open { .. }),
+            "{:?}",
+            only(&app).health
+        );
+        assert!(!only(&app).health.is_trouble());
     }
 }

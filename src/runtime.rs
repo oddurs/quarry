@@ -32,6 +32,8 @@ pub enum Msg {
         /// What the service said on connect, if anything — evidence for a
         /// second pass at identification.
         banner: Option<Vec<u8>>,
+        /// Whether a named handshake got the answer that protocol gives.
+        confirmed: Option<bool>,
     },
     /// The scan itself failed. Carries whether a retry is worth anything.
     ScanFailed {
@@ -247,6 +249,7 @@ fn run(
                         port: o.port,
                         health: o.health,
                         banner: o.banner,
+                        confirmed: o.confirmed,
                     },
                 ) {
                     return;

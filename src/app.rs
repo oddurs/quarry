@@ -281,7 +281,14 @@ impl App {
     /// introduce itself, or read a title off its own page. Both outrank a port,
     /// so the answer can improve here — never silently, since the detail pane
     /// shows what the verdict rested on.
-    pub fn apply_health(&mut self, pid: u32, port: u16, health: Health, banner: Option<Vec<u8>>) {
+    pub fn apply_health(
+        &mut self,
+        pid: u32,
+        port: u16,
+        health: Health,
+        banner: Option<Vec<u8>>,
+        confirmed: Option<bool>,
+    ) {
         let Some(indices) = self.by_pid.get(&pid) else {
             return;
         };
@@ -338,6 +345,18 @@ impl App {
 
             // Adjust the one counter this changes rather than recomputing every
             // group; the alternative is quadratic in the number of services.
+            // A port is a convention and a handshake is proof. When quarry
+            // asked the question this protocol answers and got something that
+            // was not the answer, the number on the socket is the only thing
+            // still claiming it is what it says.
+            server.unconfirmed = confirmed == Some(false);
+            if let Some(bytes) = &banner
+                && let Some(name) = &server.handshake
+                && let Some(v) = crate::handshake::version(name, bytes)
+            {
+                server.version = Some(v);
+            }
+
             let was_trouble = server.health.is_trouble();
             server.health = reinterpreted(health.clone(), server);
             let is_trouble = server.health.is_trouble();
