@@ -322,7 +322,7 @@ impl App {
             let Some(server) = self.servers.get_mut(i) else {
                 continue;
             };
-            if !server.listeners.iter().any(|l| l.port == port) {
+            if !server.answers(pid, port) {
                 continue;
             }
 

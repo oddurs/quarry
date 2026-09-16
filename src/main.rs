@@ -502,7 +502,13 @@ fn plain(startup: Startup) -> Result<()> {
     let mut servers = report.servers;
     let outcomes = probe_all(&startup.config, &servers);
     for o in outcomes {
-        for s in servers.iter_mut().filter(|s| s.pid == o.pid) {
+        // On pid *and* port. A container runtime publishes every port from one
+        // process, so several services share a pid — matching on it alone gave
+        // all eleven the health of whichever was probed first.
+        for s in servers
+            .iter_mut()
+            .filter(|s| s.pid == o.pid && s.listeners.iter().any(|l| l.port == o.port))
+        {
             s.kind = model::refine_kind(s.kind, &o.health);
             s.health = o.health.clone();
         }

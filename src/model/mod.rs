@@ -137,6 +137,17 @@ impl Server {
         None
     }
 
+    /// Whether a probe result belongs to this service.
+    ///
+    /// Pid *and* port, always. A pid can be reused between scans, and a
+    /// container runtime publishes every port from one process — so several
+    /// services share a pid, and matching on it alone gives them all the
+    /// health of whichever was probed first. Written twice, it was right in
+    /// one place and wrong in the other.
+    pub fn answers(&self, pid: u32, port: u16) -> bool {
+        self.pid == pid && self.listeners.iter().any(|l| l.port == port)
+    }
+
     /// Whether handing this to a browser is a promise that can be kept.
     ///
     /// Two conditions, and they were being written out together wherever the

@@ -27,6 +27,9 @@ pub struct Engine {
     signatures: Registry,
     containers: crate::docker::Containers,
     tunnels: crate::tunnel::Tunnels,
+    /// Set when a test pinned the container list, so a scan does not go and
+    /// ask a real runtime what is running.
+    pinned_containers: bool,
     scans: u64,
 }
 
@@ -53,6 +56,7 @@ impl Engine {
             signatures: Registry::builtin(),
             containers: Default::default(),
             tunnels: Default::default(),
+            pinned_containers: false,
             scans: 0,
         }
     }
@@ -61,6 +65,17 @@ impl Engine {
     /// built-in tables.
     pub fn with_rules(mut self, rules: Rules) -> Self {
         self.rules = rules;
+        self
+    }
+
+    /// Pin the container list instead of asking a runtime.
+    ///
+    /// Everything else in the pipeline is drivable from fixtures; this was
+    /// not, which is why the one bug that needs *several* containers on one
+    /// process went unnoticed until a real stack was put in front of it.
+    pub fn with_containers(mut self, containers: crate::docker::Containers) -> Self {
+        self.containers = containers;
+        self.pinned_containers = true;
         self
     }
 
@@ -131,7 +146,9 @@ impl Engine {
         }
 
         // Asked once per scan, not once per port.
-        self.containers = crate::docker::Containers::query();
+        if !self.pinned_containers {
+            self.containers = crate::docker::Containers::query();
+        }
         self.tunnels = crate::tunnel::Tunnels::query();
 
         let found = self.listening()?;
@@ -142,7 +159,7 @@ impl Engine {
         let mut servers: Vec<Server> = found
             .holders
             .into_iter()
-            .filter_map(|(pid, holder)| self.assemble(pid, holder, &info, &launchers))
+            .flat_map(|(pid, holder)| self.assemble(pid, holder, &info, &launchers))
             .collect();
         servers.sort_by(|a, b| {
             a.group_key()
@@ -301,15 +318,20 @@ impl Engine {
             .collect()
     }
 
-    /// One process and its sockets, turned into the thing the screen shows.
-    /// `None` for a process whose sockets all deduplicated away.
+    /// One process and its sockets, turned into the things the screen shows.
+    ///
+    /// Usually one. A container runtime publishes every port from a single
+    /// process — `com.docker.backend` held all eleven ports of an eleven
+    /// service stack — so grouping by pid alone put eleven containers on one
+    /// row, named after whichever the first listener resolved to. The
+    /// container is the service; the forwarder is not.
     fn assemble(
         &mut self,
         pid: u32,
         holder: Holder,
         info: &BTreeMap<u32, ProcInfo>,
         launchers: &BTreeMap<u32, Launcher>,
-    ) -> Option<Server> {
+    ) -> Vec<Server> {
         let Holder {
             command,
             user,
@@ -330,7 +352,7 @@ impl Engine {
         listeners
             .dedup_by(|a, b| a.transport == b.transport && a.port == b.port && a.path == b.path);
         if listeners.is_empty() {
-            return None;
+            return Vec::new();
         }
 
         let command = if command.is_empty() {
@@ -338,8 +360,41 @@ impl Engine {
         } else {
             command
         };
+
         // A published port belongs to the runtime as far as the operating
-        // system is concerned. The daemon knows whose it really is.
+        // system is concerned. The daemon knows whose it really is — and where
+        // one process is publishing several, each one is its own service.
+        // Ports behind no container stay together: that is the runtime's own
+        // listener, and it is one thing.
+        let mut split: BTreeMap<Option<String>, Vec<Listener>> = BTreeMap::new();
+        for listener in listeners {
+            let id = (listener.port != 0)
+                .then(|| self.containers.get(listener.port))
+                .flatten()
+                .map(|c| c.id.clone());
+            split.entry(id).or_default().push(listener);
+        }
+
+        split
+            .into_values()
+            .map(|listeners| self.one(pid, &command, &user, &i, listeners, launchers))
+            .collect()
+    }
+
+    /// One row: a process, or one container published by it.
+    #[allow(clippy::too_many_arguments)]
+    fn one(
+        &mut self,
+        pid: u32,
+        command: &str,
+        user: &str,
+        i: &ProcInfo,
+        listeners: Vec<Listener>,
+        launchers: &BTreeMap<u32, Launcher>,
+    ) -> Server {
+        let command = command.to_string();
+        let user = user.to_string();
+        let i = i.clone();
         let container = listeners
             .iter()
             .filter(|l| l.port != 0)
@@ -378,7 +433,7 @@ impl Engine {
             .and_then(|v| self.signatures.get(v.index));
         let verdict = identified.verdict.as_ref();
 
-        Some(Server {
+        Server {
             pid,
             ppid: i.ppid,
             command,
@@ -410,7 +465,7 @@ impl Engine {
             cpu: i.cpu,
             mem: i.mem,
             health: crate::model::Health::default(),
-        })
+        }
     }
 
     /// Which project a process belongs to.
