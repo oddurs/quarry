@@ -625,3 +625,142 @@ mod columns {
         }
     }
 }
+
+/// 0035 — a service that has only just appeared and is not yet serving is
+/// starting, which is a different thing from broken.
+mod starting {
+    use super::*;
+    use quarry::model::Health;
+
+    fn scanned(health: Health, kind: Kind) -> App {
+        let build = |h: &Health| {
+            vec![
+                server(3000, "node")
+                    .service("Next.js")
+                    .kind(kind)
+                    .health(h.clone())
+                    .build(),
+            ]
+        };
+        let mut app = App::new();
+        // Two scans: the first is not news, so nothing is new in it.
+        app.ingest(vec![server(9999, "other").build()]);
+        app.ingest(build(&Health::Unknown));
+        app.apply_health(10_000 + 3000, 3000, health, None);
+        app
+    }
+
+    fn health_of(app: &App) -> Health {
+        app.servers
+            .iter()
+            .find(|s| s.primary_port() == 3000)
+            .expect("the service")
+            .health
+            .clone()
+    }
+
+    /// A dev server binds its port immediately and then compiles. From outside
+    /// that is indistinguishable from broken, and the difference is the point.
+    #[test]
+    fn a_web_server_that_has_not_answered_yet_is_starting() {
+        for seen in [
+            Health::Closed,
+            Health::Open {
+                latency: Duration::from_millis(1),
+            },
+        ] {
+            let app = scanned(seen.clone(), Kind::Web);
+            assert!(
+                health_of(&app).is_starting(),
+                "{seen:?} on a brand new web server read as {:?}",
+                health_of(&app)
+            );
+        }
+    }
+
+    /// And stops being starting the moment it answers.
+    #[test]
+    fn answering_ends_it() {
+        let app = scanned(testkit::served(200, 9, None, None), Kind::Web);
+        assert!(!health_of(&app).is_starting(), "{:?}", health_of(&app));
+    }
+
+    /// A newly started Redis is `open`, which is already the right and final
+    /// answer for it. Calling that "starting" would be a phase it never leaves.
+    #[test]
+    fn something_that_was_never_going_to_answer_http_is_not_starting() {
+        let app = scanned(
+            Health::Open {
+                latency: Duration::from_micros(200),
+            },
+            Kind::Cache,
+        );
+        assert!(!health_of(&app).is_starting(), "{:?}", health_of(&app));
+    }
+
+    /// After the window, not answering is not a phase.
+    #[test]
+    fn a_service_that_has_been_silent_for_a_while_is_broken() {
+        let mut app = scanned(Health::Closed, Kind::Web);
+        for s in app.servers.iter_mut() {
+            if let Some(at) = s.appeared {
+                s.appeared = at.checked_sub(Duration::from_secs(300));
+            }
+        }
+        app.apply_health(10_000 + 3000, 3000, Health::Closed, None);
+        assert!(
+            matches!(health_of(&app), Health::Closed),
+            "{:?}",
+            health_of(&app)
+        );
+    }
+
+    /// Nothing quarry saw on its very first scan is new, so nothing on a
+    /// machine that was already running reads as starting.
+    #[test]
+    fn the_first_scan_starts_nothing() {
+        let mut app = App::new();
+        app.ingest(vec![
+            server(3000, "node")
+                .service("Next.js")
+                .kind(Kind::Web)
+                .build(),
+        ]);
+        app.apply_health(10_000 + 3000, 3000, Health::Closed, None);
+        assert!(matches!(health_of(&app), Health::Closed));
+    }
+
+    /// It is not a problem, so it must not be counted as one.
+    #[test]
+    fn starting_is_not_counted_as_trouble() {
+        let app = scanned(Health::Closed, Kind::Web);
+        assert!(health_of(&app).is_starting());
+        assert!(!health_of(&app).is_trouble());
+        assert_eq!(
+            app.groups.iter().map(|g| g.trouble).sum::<usize>(),
+            0,
+            "a service coming up was counted against the machine"
+        );
+    }
+
+    /// Colour is not load-bearing: `mono` and a colour-blind reader see the
+    /// distinction or it is not there.
+    #[test]
+    fn it_has_a_glyph_of_its_own() {
+        let mut seen = std::collections::HashSet::new();
+        for h in [
+            Health::Starting,
+            Health::Closed,
+            Health::Bound,
+            Health::Unknown,
+            Health::Open {
+                latency: Duration::from_millis(1),
+            },
+        ] {
+            assert!(
+                seen.insert(h.glyph()),
+                "{h:?} shares a glyph with another state"
+            );
+        }
+    }
+}

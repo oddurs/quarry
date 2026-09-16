@@ -130,6 +130,50 @@ fn flat_and_newest_first() {
     assert_snapshot("flat", &ui::render_to_string(&mut app, 118, 14, 0));
 }
 
+/// 0035 — the states that are neither working nor broken, in every theme, so
+/// the distinction is checked where it has to survive: `mono`, which has no
+/// colour at all, and `auto`, which has no palette of its own.
+#[test]
+fn the_in_between_states_in_every_theme() {
+    use quarry::model::{Health, Kind};
+    for name in ["auto", "mono", "gotham", "night", "paper"] {
+        let mut app = App::new();
+        app.ingest(vec![
+            testkit::server(3000, "node")
+                .service("Next.js")
+                .kind(Kind::Web)
+                .health(Health::Starting)
+                .build(),
+            testkit::server(3001, "node")
+                .service("Grafana")
+                .kind(Kind::Web)
+                .health(testkit::status(403, 4))
+                .build(),
+            testkit::server(3002, "node")
+                .service("Jaeger")
+                .kind(Kind::Web)
+                .health(testkit::status(503, 41))
+                .build(),
+            testkit::server(3003, "redis")
+                .service("Redis")
+                .kind(Kind::Cache)
+                .health(Health::Closed)
+                .build(),
+        ]);
+        app.detail = false;
+        app.now = NOW;
+        app.theme = Theme::resolve(name).expect("a built-in theme resolves");
+        assert_snapshot(
+            &format!("states_{name}"),
+            &ui::render_to_string(&mut app, 70, 10, 0),
+        );
+        assert_snapshot(
+            &format!("states_colours_{name}"),
+            &ui::render_styles_to_string(&mut app, 70, 10, 0),
+        );
+    }
+}
+
 #[test]
 fn standard_screen() {
     let mut app = loaded();

@@ -31,6 +31,7 @@ redirect     = "#33859d"
 client_error = "#d26939"
 server_error = "#c23127"
 open         = "#2aa889"
+starting     = "#d26939"   # bound, and not yet serving
 closed       = "#c23127"
 unknown      = "#245361"
 

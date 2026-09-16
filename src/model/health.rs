@@ -20,6 +20,14 @@ pub enum Health {
     /// Bound, but nothing was tested. A UDP socket cannot be connected to, and
     /// saying "open" would claim a check that did not happen.
     Bound,
+    /// Just appeared, and not yet serving what it is expected to serve.
+    ///
+    /// A dev server binds its port the moment it starts and then spends thirty
+    /// seconds compiling. Reporting that as `open` says less than it could, and
+    /// reporting it as `not responding` says something false: nothing is wrong,
+    /// it is not ready. Only a service seen for the first time within the last
+    /// minute qualifies — after that, not answering is not a phase.
+    Starting,
     /// The port is gone since the last scan.
     Closed,
 }
@@ -31,6 +39,7 @@ impl Health {
         match self {
             Health::Unknown => "○",
             Health::Bound => "◍",
+            Health::Starting => "◌",
             Health::Open { .. } => "●",
             Health::Closed => "✕",
             Health::Http { status, .. } => match status {
@@ -47,6 +56,7 @@ impl Health {
         match self {
             Health::Unknown => "checking".into(),
             Health::Bound => "bound".into(),
+            Health::Starting => "starting".into(),
             Health::Open { latency } => format!("open · {}", fmt_ms(*latency)),
             Health::Closed => "not responding".into(),
             Health::Http {
@@ -72,8 +82,11 @@ impl Health {
             Health::Http { .. } => 2,
             Health::Open { .. } => 3,
             Health::Bound => 4,
-            Health::Unknown => 5,
-            Health::Closed => 6,
+            // Above `Unknown`: a service we know is coming up is a better
+            // answer than one we have not asked about.
+            Health::Starting => 5,
+            Health::Unknown => 6,
+            Health::Closed => 7,
         }
     }
 
@@ -88,6 +101,11 @@ impl Health {
                 ..
             }
         )
+    }
+
+    /// Not yet serving, and not yet a problem.
+    pub fn is_starting(&self) -> bool {
+        matches!(self, Health::Starting)
     }
 
     pub fn is_trouble(&self) -> bool {

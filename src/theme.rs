@@ -96,6 +96,9 @@ pub struct Theme {
     pub protected: Color,
     pub server_error: Color,
     pub open: Color,
+    /// Bound and not yet serving. Neither working nor broken, and drawing it as
+    /// either says something that is not true yet.
+    pub starting: Color,
     pub closed: Color,
     pub unknown: Color,
 
@@ -160,6 +163,7 @@ impl Theme {
         }
         match health {
             Health::Unknown => self.unknown,
+            Health::Starting => self.starting,
             Health::Bound => self.open,
             Health::Open { .. } => self.open,
             Health::Closed => self.closed,
@@ -205,6 +209,7 @@ impl Theme {
             protected: Color::LightBlue,
             server_error: Color::Red,
             open: Color::Cyan,
+            starting: Color::Yellow,
             closed: Color::Red,
             unknown: Color::DarkGray,
             repo: Color::Magenta,
@@ -269,6 +274,7 @@ impl Theme {
             protected: r,
             server_error: r,
             open: r,
+            starting: r,
             closed: r,
             unknown: r,
             repo: r,
@@ -308,6 +314,7 @@ impl Theme {
             protected,
             server_error,
             open,
+            starting,
             closed,
             unknown,
             repo,
@@ -437,6 +444,9 @@ impl Theme {
             protected: pick(12, 4),
             server_error: pick(9, 1),
             open: pick(14, 6),
+            // Amber for "not yet": the palette's yellow is the one slot that
+            // reads as neither working nor broken.
+            starting: pick(11, 3),
             closed: pick(9, 1),
             unknown: slot(8),
             repo: pick(13, 5),
@@ -667,6 +677,7 @@ struct ThemeFile {
     protected: Option<String>,
     server_error: Option<String>,
     open: Option<String>,
+    starting: Option<String>,
     closed: Option<String>,
     unknown: Option<String>,
     repo: Option<String>,

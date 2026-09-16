@@ -339,7 +339,7 @@ impl App {
             // Adjust the one counter this changes rather than recomputing every
             // group; the alternative is quadratic in the number of services.
             let was_trouble = server.health.is_trouble();
-            server.health = health.clone();
+            server.health = reinterpreted(health.clone(), server);
             let is_trouble = server.health.is_trouble();
 
             if was_trouble != is_trouble
@@ -1152,6 +1152,35 @@ fn unix_seconds() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+/// A service seen for the first time this recently, and not yet serving, is
+/// starting rather than broken. After it, not answering is not a phase.
+const STARTING_WINDOW: Duration = Duration::from_secs(60);
+
+/// Reinterpret a probe result for a service that has only just appeared.
+///
+/// The probe reports what it saw from the outside. Whether that is a failure
+/// depends on one thing it cannot know: whether the service existed a minute
+/// ago. A dev server binds its port immediately and then compiles for thirty
+/// seconds — from outside that is indistinguishable from a service that is
+/// broken, and the difference is the whole point of saying so.
+///
+/// Only where something was expected to answer. A newly started Redis is
+/// `open`, which is already the right and final answer for it; calling that
+/// "starting" would be a phase it never leaves.
+fn reinterpreted(health: Health, server: &Server) -> Health {
+    let answered = matches!(health, Health::Http { .. });
+    let expected_an_answer = server.kind.opens_in_a_browser() || server.health_path.is_some();
+    let just_appeared = server
+        .appeared
+        .is_some_and(|at| at.elapsed() < STARTING_WINDOW);
+
+    if !answered && expected_an_answer && just_appeared {
+        Health::Starting
+    } else {
+        health
+    }
 }
 
 /// `1 container`, `3 containers`.
