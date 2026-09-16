@@ -34,4 +34,5 @@ pub mod source;
 pub mod term;
 pub mod testkit;
 pub mod theme;
+pub mod tunnel;
 pub mod ui;

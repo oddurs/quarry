@@ -60,6 +60,8 @@ pub struct Server {
     /// asked" and "asked, and it does not implement the health service" —
     /// most do not, and not answering is running rather than broken.
     pub serving: Option<bool>,
+    /// Where the world can reach this, when something is exposing it.
+    pub exposed: Option<crate::tunnel::Exposure>,
     /// The container behind this port, where the runtime published one.
     pub container: Option<crate::docker::Container>,
     pub started_at: u64,

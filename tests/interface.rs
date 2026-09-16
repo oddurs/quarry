@@ -912,3 +912,108 @@ mod grpc {
         assert_eq!(only(&app).serving, None);
     }
 }
+
+/// 0039 — a tunnel exists to give a local port a public address, and quarry
+/// showed the local port: the one piece of information the user already had.
+mod tunnels {
+    use super::*;
+    use quarry::tunnel::Exposure;
+
+    fn exposed() -> App {
+        let mut app = App::new();
+        let mut s = server(3000, "node")
+            .service("Next.js")
+            .kind(Kind::Web)
+            .health(testkit::served(200, 9, None, None))
+            .build();
+        s.exposed = Some(Exposure {
+            public_url: "https://cold-poem-42.ngrok.app".into(),
+            agent: "ngrok",
+        });
+        let plain = server(3001, "node")
+            .service("worker")
+            .kind(Kind::Api)
+            .build();
+        app.ingest(vec![s, plain]);
+        app
+    }
+
+    /// The most important thing about a tunnel is that it is open.
+    #[test]
+    fn an_exposed_service_is_marked_in_the_list() {
+        let mut app = exposed();
+        let screen = quarry::ui::render_to_string(&mut app, 100, 24, 0);
+        let row = screen
+            .lines()
+            .find(|l| l.contains("3000"))
+            .expect("the row");
+        assert!(row.contains('⇡'), "nothing marks it as exposed: {row:?}");
+
+        let other = screen
+            .lines()
+            .find(|l| l.contains("3001"))
+            .expect("the row");
+        assert!(
+            !other.contains('⇡'),
+            "a local-only service was marked: {other:?}"
+        );
+    }
+
+    #[test]
+    fn the_public_url_is_in_the_detail_pane_with_what_put_it_there() {
+        let mut app = exposed();
+        let screen = quarry::ui::render_to_string(&mut app, 100, 24, 0);
+        assert!(screen.contains("ngrok.app"), "{screen}");
+        assert!(
+            screen.contains("exposed to the internet by ngrok"),
+            "{screen}"
+        );
+    }
+
+    /// Sharing it is the reason it is exposed.
+    #[test]
+    fn copy_gives_the_address_worth_pasting() {
+        let mut app = exposed();
+        app.selected = app
+            .rows
+            .iter()
+            .position(|r| matches!(r, Row::Server(i) if app.servers[*i].primary_port() == 3000))
+            .expect("the exposed row");
+        assert_eq!(
+            app.copy_selected(),
+            quarry::app::Action::Copy("https://cold-poem-42.ngrok.app".into())
+        );
+
+        app.selected = app
+            .rows
+            .iter()
+            .position(|r| matches!(r, Row::Server(i) if app.servers[*i].primary_port() == 3001))
+            .expect("the local row");
+        match app.copy_selected() {
+            quarry::app::Action::Copy(url) => assert!(url.contains("3001"), "{url}"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// `↗` in the detail pane already means "this opens in a browser". The
+    /// exposure mark has to be its own glyph or it means two things.
+    #[test]
+    fn the_exposure_mark_is_not_the_browser_mark() {
+        let mut app = exposed();
+        let screen = quarry::ui::render_to_string(&mut app, 100, 24, 0);
+        let row = screen
+            .lines()
+            .find(|l| l.contains("3000"))
+            .expect("the row");
+        assert!(!row.contains('↗'), "{row:?}");
+    }
+
+    /// Most machines are not running an agent, and that is not a failure.
+    #[test]
+    fn nothing_exposed_marks_nothing() {
+        let mut app = App::new();
+        app.ingest(vec![server(3000, "node").service("Next.js").build()]);
+        let screen = quarry::ui::render_to_string(&mut app, 100, 24, 0);
+        assert!(!screen.contains('⇡'), "{screen}");
+    }
+}

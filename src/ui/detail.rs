@@ -121,6 +121,24 @@ fn detail_address(s: &Server, t: &Theme) -> Vec<Line<'static>> {
             ),
         ]));
     }
+    if let Some(exposed) = &s.exposed {
+        lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled(
+                exposed.public_url.clone(),
+                Style::default()
+                    .fg(t.accent)
+                    .add_modifier(Modifier::UNDERLINED),
+            ),
+        ]));
+        lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled(
+                format!("exposed to the internet by {}", exposed.agent),
+                Style::default().fg(t.accent),
+            ),
+        ]));
+    }
     lines.push(Line::from(""));
     lines
 }

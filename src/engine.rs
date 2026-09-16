@@ -26,6 +26,7 @@ pub struct Engine {
     rules: Rules,
     signatures: Registry,
     containers: crate::docker::Containers,
+    tunnels: crate::tunnel::Tunnels,
     scans: u64,
 }
 
@@ -51,6 +52,7 @@ impl Engine {
             rules: Rules::default(),
             signatures: Registry::builtin(),
             containers: Default::default(),
+            tunnels: Default::default(),
             scans: 0,
         }
     }
@@ -130,6 +132,7 @@ impl Engine {
 
         // Asked once per scan, not once per port.
         self.containers = crate::docker::Containers::query();
+        self.tunnels = crate::tunnel::Tunnels::query();
 
         let found = self.listening()?;
         let info = self.process_table(found.holders.keys().copied().collect());
@@ -259,6 +262,11 @@ impl Engine {
             .filter(|l| l.port != 0)
             .find_map(|l| self.containers.get(l.port))
             .cloned();
+        let exposed = listeners
+            .iter()
+            .filter(|l| l.port != 0)
+            .find_map(|l| self.tunnels.get(l.port))
+            .cloned();
         let repo = self.attribute(&i, container.as_ref());
 
         let ports: Vec<u16> = listeners
@@ -309,6 +317,7 @@ impl Engine {
             unconfirmed: false,
             version: None,
             serving: None,
+            exposed,
             evidence: verdict.map(|v| v.reasons.clone()).unwrap_or_default(),
             container,
             started_at: i.started_at,

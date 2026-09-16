@@ -334,7 +334,7 @@ fn server_line(
 
     let reserved = status.chars().count() + if show_badge { badge_cost } else { 0 };
     let name_width = avail.saturating_sub(reserved);
-    let doubt = usize::from(s.unconfirmed);
+    let doubt = usize::from(s.unconfirmed) + usize::from(s.exposed.is_some());
     let name = truncate(
         &s.service_name(),
         name_width
@@ -360,6 +360,15 @@ fn server_line(
         Span::styled(
             if s.unconfirmed { "?" } else { "" },
             Style::default().fg(t.client_error).bold(),
+        ),
+        // Reachable from outside this machine, right now. There is nothing
+        // else in a row anyone needs to find in a hurry.
+        //
+        // Not `↗`, which the detail pane already uses for "this opens in a
+        // browser". One glyph meaning two things is worse than either.
+        Span::styled(
+            if s.exposed.is_some() { "⇡" } else { "" },
+            Style::default().fg(t.accent).bold(),
         ),
         Span::styled(extra_ports, Style::default().fg(t.faint)),
         Span::raw(" ".repeat(pad)),

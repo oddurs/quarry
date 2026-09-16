@@ -761,9 +761,18 @@ impl App {
         Action::Copy(uri)
     }
 
+    /// Copy the address worth pasting.
+    ///
+    /// For an exposed service that is the public one: sharing it is the reason
+    /// it is exposed, and the local port is the piece the user already had.
+    /// Opening still goes to the local address — that is for looking at it
+    /// yourself, and the short way round is better.
     pub fn copy_selected(&mut self) -> Action {
         match self.selected_server() {
-            Some(s) => Action::Copy(s.url()),
+            Some(s) => Action::Copy(match &s.exposed {
+                Some(exposed) => exposed.public_url.clone(),
+                None => s.url(),
+            }),
             None => Action::None,
         }
     }
