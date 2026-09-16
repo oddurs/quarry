@@ -26,6 +26,8 @@ pub fn run(name: &str, stream: &TcpStream, window: Duration) -> Option<Vec<u8>> 
         "amqp" => AMQP_HEADER.to_vec(),
         "kafka" => kafka_api_versions(),
         "dns" => dns_query(),
+        "h2c" => h2_preface(),
+        "grpc" => grpc_health_check(),
         // MySQL, NATS and the SMTP family greet on connect, so they are
         // handled by the banner read and never reach here.
         _ => return None,
@@ -47,6 +49,8 @@ pub fn is_known(name: &str) -> bool {
             | "mqtt"
             | "kafka"
             | "dns"
+            | "h2c"
+            | "grpc"
     )
 }
 
@@ -95,6 +99,10 @@ pub fn confirms(name: &str, reply: &[u8]) -> bool {
             reply.get(2..4) == Some(&DNS_ID.to_be_bytes()[..])
                 && reply.get(4).is_some_and(|f| f & 0x80 != 0)
         }
+        // A SETTINGS frame is the first thing an HTTP/2 server sends and the
+        // only thing that answers the preface. Nothing else replies to it at
+        // all, which is what makes it proof rather than a hint.
+        "h2c" | "grpc" => frames(reply).next().is_some_and(|f| f.kind == SETTINGS),
         // A protocol we have no proof for cannot disprove anything either.
         _ => true,
     }
@@ -294,6 +302,164 @@ fn dns_query() -> Vec<u8> {
     let mut out = (msg.len() as u16).to_be_bytes().to_vec();
     out.extend_from_slice(&msg);
     out
+}
+
+/// The HTTP/2 connection preface, followed by the empty SETTINGS frame a client
+/// is required to send. A server answers with SETTINGS of its own and nothing
+/// that is not an HTTP/2 server answers at all.
+fn h2_preface() -> Vec<u8> {
+    let mut out = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".to_vec();
+    out.extend_from_slice(&frame(SETTINGS, 0, 0, &[]));
+    out
+}
+
+const DATA: u8 = 0x00;
+const HEADERS: u8 = 0x01;
+const SETTINGS: u8 = 0x04;
+const END_STREAM: u8 = 0x01;
+const END_HEADERS: u8 = 0x04;
+
+/// One HTTP/2 frame: a nine-byte header — 24-bit length, type, flags, 31-bit
+/// stream id — and its payload.
+fn frame(kind: u8, flags: u8, stream: u32, payload: &[u8]) -> Vec<u8> {
+    let len = payload.len();
+    let mut out = vec![(len >> 16) as u8, (len >> 8) as u8, len as u8, kind, flags];
+    out.extend_from_slice(&stream.to_be_bytes());
+    out.extend_from_slice(payload);
+    out
+}
+
+struct Frame<'a> {
+    kind: u8,
+    payload: &'a [u8],
+}
+
+/// Walk the frames in a reply, stopping at the first one that does not fit.
+/// A truncated read is ordinary here: we stop reading after a fixed window.
+fn frames(mut bytes: &[u8]) -> impl Iterator<Item = Frame<'_>> {
+    std::iter::from_fn(move || {
+        let header = bytes.get(..9)?;
+        let len = u32::from_be_bytes([0, header[0], header[1], header[2]]) as usize;
+        let payload = bytes.get(9..9 + len)?;
+        let kind = header[3];
+        bytes = &bytes[9 + len..];
+        Some(Frame { kind, payload })
+    })
+}
+
+/// `grpc.health.v1.Health/Check`, the one method every gRPC server is supposed
+/// to answer and most do not implement — which is why not answering it is read
+/// as "running" rather than "broken".
+///
+/// A whole HTTP/2 client is not needed to ask one question. HPACK is used only
+/// in its literal-without-indexing form, which never touches the dynamic table,
+/// so nothing here has to remember anything between frames.
+fn grpc_health_check() -> Vec<u8> {
+    let mut hpack = Vec::new();
+    // Literal header field without indexing, indexed name: 0000 then the index.
+    literal_indexed(&mut hpack, 3, None); // :method: POST
+    literal_indexed(&mut hpack, 6, None); // :scheme: http
+    literal_indexed(&mut hpack, 4, Some("/grpc.health.v1.Health/Check")); // :path
+    literal_indexed(&mut hpack, 1, Some("localhost")); // :authority
+    literal_indexed(&mut hpack, 31, Some("application/grpc")); // content-type
+    literal_named(&mut hpack, "te", "trailers");
+
+    // An empty HealthCheckRequest, in gRPC's length-prefixed framing: one byte
+    // saying "not compressed", then a four-byte length.
+    let body = [0u8, 0, 0, 0, 0];
+
+    let mut out = h2_preface();
+    out.extend_from_slice(&frame(HEADERS, END_HEADERS, 1, &hpack));
+    out.extend_from_slice(&frame(DATA, END_STREAM, 1, &body));
+    out
+}
+
+/// A header whose name is in HPACK's static table. `value` of `None` means the
+/// static entry's own value is right, which for `:method: POST` and
+/// `:scheme: http` it is.
+fn literal_indexed(out: &mut Vec<u8>, index: u32, value: Option<&str>) {
+    match value {
+        // Indexed header field: a set top bit and a seven-bit index.
+        None => push_integer(out, 0x80, 7, index),
+        Some(v) => {
+            // Literal without indexing: a `0000` prefix and a *four*-bit index.
+            // `content-type` is static index 31, which does not fit in four
+            // bits — written as one byte it reads as a different header type
+            // entirely, and the server misparses everything after it.
+            push_integer(out, 0x00, 4, index);
+            push_string(out, v);
+        }
+    }
+}
+
+fn literal_named(out: &mut Vec<u8>, name: &str, value: &str) {
+    out.push(0x00); // literal with a new name
+    push_string(out, name);
+    push_string(out, value);
+}
+
+/// HPACK's integer encoding: `n` low bits of the first octet, and if the value
+/// does not fit, the rest in seven-bit continuation octets.
+fn push_integer(out: &mut Vec<u8>, flags: u8, n: u32, value: u32) {
+    let max = (1u32 << n) - 1;
+    if value < max {
+        out.push(flags | value as u8);
+        return;
+    }
+    out.push(flags | max as u8);
+    let mut rest = value - max;
+    while rest >= 128 {
+        out.push((rest % 128) as u8 | 0x80);
+        rest /= 128;
+    }
+    out.push(rest as u8);
+}
+
+/// An HPACK string: a seven-bit length with the Huffman bit clear, then the
+/// bytes. Nothing here is long enough for Huffman to be worth encoding.
+fn push_string(out: &mut Vec<u8>, s: &str) {
+    debug_assert!(s.len() < 127, "would need a multi-byte length prefix");
+    out.push(s.len() as u8);
+    out.extend_from_slice(s.as_bytes());
+}
+
+/// What a gRPC server said about its own health.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Serving {
+    /// It answered, and it is well.
+    Yes,
+    /// It answered, and it is not.
+    No,
+    /// It speaks HTTP/2 but said nothing about health — which most gRPC
+    /// servers do, because most do not implement the health service.
+    Unsaid,
+}
+
+/// Read the answer out of a gRPC reply without decoding HPACK.
+///
+/// The status is in the DATA frame, as a `HealthCheckResponse`: field 1, a
+/// varint, `1` for `SERVING` and `2` for `NOT_SERVING`. The trailers carry
+/// `grpc-status` too, but those are HPACK-encoded and reading them would mean
+/// a dynamic table — for a number we already have.
+pub fn serving(reply: &[u8]) -> Serving {
+    for f in frames(reply) {
+        if f.kind != DATA {
+            continue;
+        }
+        // Five bytes of gRPC framing, then the protobuf message.
+        let Some(message) = f.payload.get(5..) else {
+            continue;
+        };
+        // Field 1, varint: tag byte 0x08.
+        if let [0x08, status, ..] = message {
+            return match status {
+                1 => Serving::Yes,
+                2 => Serving::No,
+                _ => Serving::Unsaid,
+            };
+        }
+    }
+    Serving::Unsaid
 }
 
 #[cfg(test)]
@@ -644,5 +810,135 @@ mod version_tests {
             .collect();
         let got = version("memcached", &[b"VERSION ".to_vec(), noise].concat());
         assert!(got.is_none(), "{got:?}");
+    }
+}
+
+#[cfg(test)]
+mod http2_tests {
+    use super::*;
+
+    /// Asserted against RFC 7541 §5.1's own worked examples rather than against
+    /// a round trip through this file, which would only prove the encoder
+    /// agrees with itself.
+    #[test]
+    fn hpack_integers_match_the_rfc() {
+        let mut out = Vec::new();
+        // §C.1.1 — 10 in a five-bit prefix is one octet.
+        push_integer(&mut out, 0x00, 5, 10);
+        assert_eq!(out, vec![0x0a]);
+
+        // §C.1.2 — 1337 in a five-bit prefix is three.
+        out.clear();
+        push_integer(&mut out, 0x00, 5, 1337);
+        assert_eq!(out, vec![0x1f, 0x9a, 0x0a]);
+
+        // §C.1.3 — 42 in an eight-bit prefix is one.
+        out.clear();
+        push_integer(&mut out, 0x00, 8, 42);
+        assert_eq!(out, vec![0x2a]);
+    }
+
+    /// The bug this encoding exists to avoid: a four-bit prefix holds indices
+    /// up to fourteen, and `content-type` is thirty-one.
+    #[test]
+    fn a_static_index_past_fourteen_spills_into_a_second_octet() {
+        let mut out = Vec::new();
+        literal_indexed(&mut out, 31, Some("application/grpc"));
+        assert_eq!(
+            &out[..2],
+            &[0x0f, 0x10],
+            "content-type was written as one octet and reads as another header"
+        );
+
+        // And an index that does fit still takes one octet.
+        out.clear();
+        literal_indexed(&mut out, 4, Some("/"));
+        assert_eq!(out[0], 0x04);
+    }
+
+    #[test]
+    fn the_preface_is_the_one_in_the_spec() {
+        let sent = h2_preface();
+        assert!(sent.starts_with(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"));
+        // Followed by an empty SETTINGS frame, which a client must send first.
+        assert_eq!(&sent[24..], &[0, 0, 0, SETTINGS, 0, 0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn the_health_check_is_a_well_formed_request() {
+        let sent = grpc_health_check();
+        assert!(sent.starts_with(b"PRI * HTTP/2.0"));
+
+        let kinds: Vec<u8> = frames(&sent[24..]).map(|f| f.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![SETTINGS, HEADERS, DATA],
+            "a gRPC call is settings, then headers, then the message"
+        );
+
+        let header_frame = frames(&sent[24..]).nth(1).expect("the HEADERS frame");
+        let text = String::from_utf8_lossy(header_frame.payload);
+        assert!(text.contains("/grpc.health.v1.Health/Check"), "{text:?}");
+        assert!(text.contains("application/grpc"), "{text:?}");
+        assert!(text.contains("trailers"), "{text:?}");
+    }
+
+    fn settings_frame() -> Vec<u8> {
+        frame(SETTINGS, 0, 0, &[])
+    }
+
+    /// Nothing but an HTTP/2 server answers the preface at all.
+    #[test]
+    fn a_settings_frame_is_proof_of_http2() {
+        assert!(confirms("h2c", &settings_frame()));
+        assert!(confirms("grpc", &settings_frame()));
+
+        for impostor in [
+            &b"HTTP/1.1 400 Bad Request\r\n"[..],
+            b"SSH-2.0-OpenSSH_9.6\r\n",
+            b"+PONG\r\n",
+            b"",
+        ] {
+            assert!(!confirms("h2c", impostor), "{impostor:?} passed as HTTP/2");
+        }
+    }
+
+    /// Most gRPC servers do not implement the health service. Not answering it
+    /// is "running", not "broken".
+    #[test]
+    fn a_server_with_no_health_service_reads_as_running() {
+        assert_eq!(serving(&settings_frame()), Serving::Unsaid);
+
+        // Headers and trailers but no message body — a `grpc-status` of 12,
+        // unimplemented, which is what a server without the service returns.
+        let mut reply = settings_frame();
+        reply.extend_from_slice(&frame(HEADERS, END_HEADERS, 1, &[0x88]));
+        assert_eq!(serving(&reply), Serving::Unsaid);
+    }
+
+    #[test]
+    fn serving_and_not_serving_are_read_from_the_message() {
+        for (status, expected) in [(1u8, Serving::Yes), (2, Serving::No)] {
+            let mut body = vec![0u8, 0, 0, 0, 2]; // gRPC framing: uncompressed, two bytes
+            body.extend_from_slice(&[0x08, status]); // field 1, varint
+            let mut reply = settings_frame();
+            reply.extend_from_slice(&frame(DATA, END_STREAM, 1, &body));
+            assert_eq!(serving(&reply), expected);
+        }
+    }
+
+    /// The read window closes after a fixed time, so a reply is routinely cut
+    /// mid-frame. That must end the walk, not run off the end of the buffer.
+    #[test]
+    fn a_truncated_reply_stops_rather_than_panicking() {
+        let full = {
+            let mut r = settings_frame();
+            r.extend_from_slice(&frame(DATA, END_STREAM, 1, &[0u8, 0, 0, 0, 2, 0x08, 1]));
+            r
+        };
+        for cut in 0..full.len() {
+            let _ = serving(&full[..cut]);
+            let _ = confirms("h2c", &full[..cut]);
+        }
     }
 }

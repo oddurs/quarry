@@ -839,3 +839,76 @@ mod handshakes {
         assert!(!only(&app).health.is_trouble());
     }
 }
+
+/// 0038 — a gRPC server speaks HTTP/2 with prior knowledge and no TLS, so an
+/// HTTP/1.1 request gets nothing back and every gRPC backend was invisible.
+mod grpc {
+    use super::*;
+    use quarry::model::Health;
+
+    fn probed(reply: Option<Vec<u8>>) -> App {
+        let mut app = App::new();
+        let mut s = server(50051, "server")
+            .service("gRPC service")
+            .kind(Kind::Api)
+            .build();
+        s.handshake = Some("grpc".into());
+        app.ingest(vec![s]);
+        app.apply_health(
+            10_000 + 50051,
+            50051,
+            Health::Open {
+                latency: Duration::from_millis(2),
+            },
+            reply,
+            Some(true),
+        );
+        app
+    }
+
+    fn only(app: &App) -> &Server {
+        app.servers.first().expect("the service")
+    }
+
+    /// Five bytes of gRPC framing, then `HealthCheckResponse { status }`.
+    fn data_frame(status: u8) -> Vec<u8> {
+        let body = [0u8, 0, 0, 0, 2, 0x08, status];
+        let mut out = vec![0, 0, 0, 0x04, 0, 0, 0, 0, 0]; // SETTINGS
+        out.extend_from_slice(&[0, 0, body.len() as u8, 0x00, 0x01, 0, 0, 0, 1]);
+        out.extend_from_slice(&body);
+        out
+    }
+
+    #[test]
+    fn a_server_that_says_it_is_serving_says_so_in_the_detail_pane() {
+        let mut app = probed(Some(data_frame(1)));
+        assert_eq!(only(&app).serving, Some(true));
+        let screen = quarry::ui::render_to_string(&mut app, 100, 24, 0);
+        assert!(screen.contains("serving"), "{screen}");
+    }
+
+    #[test]
+    fn a_server_that_says_it_is_not_serving_says_that_too() {
+        let mut app = probed(Some(data_frame(2)));
+        assert_eq!(only(&app).serving, Some(false));
+        let screen = quarry::ui::render_to_string(&mut app, 100, 24, 0);
+        assert!(screen.contains("not serving"), "{screen}");
+    }
+
+    /// Most gRPC servers do not implement the health service. Speaking HTTP/2
+    /// and saying nothing about health is running, not broken.
+    #[test]
+    fn a_server_with_no_health_service_is_not_reported_unwell() {
+        let settings_only = vec![0, 0, 0, 0x04, 0, 0, 0, 0, 0];
+        let app = probed(Some(settings_only));
+        assert_eq!(only(&app).serving, None);
+        assert!(!only(&app).health.is_trouble());
+    }
+
+    /// And the HTTP/2 preface is what identified it in the first place.
+    #[test]
+    fn a_socket_that_ignored_the_preface_is_not_confirmed() {
+        let app = probed(None);
+        assert_eq!(only(&app).serving, None);
+    }
+}

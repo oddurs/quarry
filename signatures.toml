@@ -1167,6 +1167,7 @@ kind = "vector"
 ports = [19530, 9091]
 process = ["milvus"]
 health = "/healthz"
+probe = "grpc"
 note = "19530 is the gRPC/SDK port and speaks no HTTP; the health check and the WebUI (/webui) live on 9091."
 
 [[signature]]
@@ -1269,6 +1270,14 @@ http_title = "AKHQ*"
 health = "/health"
 uri = "http://localhost:{port}/"
 note = "A Micronaut app, so /health rather than /actuator/health distinguishes it from Kafka UI on the same port."
+
+[[signature]]
+name = "gRPC service"
+kind = "api"
+ports = [50051]
+probe = "grpc"
+uri = "grpc://localhost:{port}"
+note = "50051 is the conventional gRPC port. The name comes from the port and the HTTP/2 preface, not from the service itself — gRPC carries no way to ask what it is."
 
 [[signature]]
 name = "Apache Kafka"

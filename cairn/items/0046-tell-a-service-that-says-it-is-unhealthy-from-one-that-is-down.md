@@ -50,3 +50,7 @@ Cheaper options, in order of preference:
 - [ ] the extra request is bounded: it does not run for every service on
       every scan
 - [ ] the probe budget in `tests/performance.rs` still passes
+
+## 2026-09-15
+
+A second source of 'degraded' arrived with 0038: a gRPC server answering NOT_SERVING on grpc.health.v1.Health/Check. The answer is read and shown in the detail pane already; what is missing is the same thing an unhealthy /healthz is missing, which is a health state that means 'answering, and saying it is unwell'. Both should land together.

@@ -352,9 +352,19 @@ impl App {
             server.unconfirmed = confirmed == Some(false);
             if let Some(bytes) = &banner
                 && let Some(name) = &server.handshake
-                && let Some(v) = crate::handshake::version(name, bytes)
             {
-                server.version = Some(v);
+                if let Some(v) = crate::handshake::version(name, bytes) {
+                    server.version = Some(v);
+                }
+                // The gRPC reply arrives on the same channel a banner does, so
+                // reading it costs nothing beyond looking.
+                if name == "grpc" {
+                    server.serving = match crate::handshake::serving(bytes) {
+                        crate::handshake::Serving::Yes => Some(true),
+                        crate::handshake::Serving::No => Some(false),
+                        crate::handshake::Serving::Unsaid => None,
+                    };
+                }
             }
 
             let was_trouble = server.health.is_trouble();

@@ -56,6 +56,10 @@ pub struct Server {
     pub unconfirmed: bool,
     /// The version the service volunteered, where its protocol offers one.
     pub version: Option<String>,
+    /// What a gRPC server said about its own health. `None` covers both "not
+    /// asked" and "asked, and it does not implement the health service" —
+    /// most do not, and not answering is running rather than broken.
+    pub serving: Option<bool>,
     /// The container behind this port, where the runtime published one.
     pub container: Option<crate::docker::Container>,
     pub started_at: u64,

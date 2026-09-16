@@ -153,6 +153,18 @@ fn detail_health(s: &Server, t: &Theme) -> Vec<Line<'static>> {
         ]));
     }
     lines.extend(s.version.as_deref().map(|v| kv("version", v, t)));
+    // A gRPC server's own verdict on itself, where it implements the health
+    // service. Most do not, and silence is running rather than broken.
+    if let Some(serving) = s.serving {
+        lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled(format!("{:<8}", "grpc"), Style::default().fg(t.faint)),
+            Span::styled(
+                if serving { "serving" } else { "not serving" },
+                Style::default().fg(if serving { t.ok } else { t.server_error }),
+            ),
+        ]));
+    }
     if let Health::Http { server, title, .. } = &s.health {
         lines.extend(title.as_deref().map(|page| kv("page", page, t)));
         lines.extend(server.as_deref().map(|name| kv("server", name, t)));
