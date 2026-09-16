@@ -1,0 +1,19 @@
+legend:
+  a = Blue
+  b = Reset
+  c = Gray
+  d = DarkGray
+  e = Red
+  f = Cyan
+  g = Yellow
+
+.aaaaaa..b.ccccccccc.................................ccccccc.cccc.ccc.
+dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+d.bbbbbbbb.ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+d.d.dd.ddddddd..................................................ee..ed
+db.b..bbbb.bbbbbbb...................................bbb..bbb..bbbbb.d
+d..e..bbbb.bbbbbb....................................fff..eee...eeee.d
+d..g..bbbb.bbbbbbb...................................fff..gggggggg...d
+d..e..bbbb.bbbbb...................................ggggg..ee.eeeeee..d
+dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+.aa.dddd..a.dddd..a.dddd..a.dddddd..a.ddd..a.dddd..a.ddddddd..a.dddd..

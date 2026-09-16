@@ -90,6 +90,7 @@ accent = "#edb54b"
 | `border_focus` | the outline of whatever has focus |
 | `selection` | the ground under the selected row |
 | `selection_reverse` | `true` uses reverse video instead of `selection` |
+| `fresh` | the ground under a service that has just appeared. Omit it and the arrival keeps its `+` marker without a tint, which is what a theme derived from an unknown terminal palette does |
 
 ### Text
 

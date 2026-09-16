@@ -99,6 +99,10 @@ pub struct Outcome {
     /// What the service said, unprompted, if anything. Evidence for a second
     /// pass at identification.
     pub banner: Option<Vec<u8>>,
+    /// Whether a named handshake got the answer that protocol gives.
+    pub confirmed: Option<bool>,
+    /// What the service presented, where it speaks TLS.
+    pub certificate: Option<crate::certificate::Certificate>,
 }
 
 /// Everything one probe learned.
@@ -106,6 +110,13 @@ pub struct Outcome {
 pub struct Observation {
     pub health: Health,
     pub banner: Option<Vec<u8>>,
+    /// What a named handshake settled. `Some(false)` means quarry asked the
+    /// question this protocol answers and got something that was not the
+    /// answer — the port says one thing and the socket says another. `None`
+    /// means no handshake was named, or none was run.
+    pub confirmed: Option<bool>,
+    /// What the service presented, where it speaks TLS.
+    pub certificate: Option<crate::certificate::Certificate>,
 }
 
 impl From<Health> for Observation {
@@ -113,6 +124,8 @@ impl From<Health> for Observation {
         Observation {
             health,
             banner: None,
+            confirmed: None,
+            certificate: None,
         }
     }
 }
@@ -202,7 +215,19 @@ impl Prober for NetProber {
             &target.path,
             self.max_body,
         ) {
-            return h.into();
+            // It answered over TLS, so there is a certificate to look at and
+            // this is the one place that knows it. One extra handshake per
+            // HTTPS service per scan — of which a developer machine has very
+            // few, and a service with none pays nothing.
+            let certificate = (first == "https")
+                .then(|| crate::tls::peek(sock, &host, self.connect_timeout))
+                .flatten();
+            return Observation {
+                health: h,
+                banner: None,
+                confirmed: None,
+                certificate,
+            };
         }
         let first_attempt = started.elapsed();
 
@@ -226,7 +251,15 @@ impl Prober for NetProber {
                 &target.path,
                 self.max_body,
             ) {
-                return h.into();
+                let certificate = (second == "https")
+                    .then(|| crate::tls::peek(sock, &host, self.connect_timeout))
+                    .flatten();
+                return Observation {
+                    health: h,
+                    banner: None,
+                    confirmed: None,
+                    certificate,
+                };
             }
         }
 
@@ -269,6 +302,8 @@ impl NetProber {
                 return Observation {
                     health: Health::Open { latency },
                     banner: Some(buf[..n].to_vec()),
+                    confirmed: None,
+                    certificate: None,
                 };
             }
         }
@@ -284,27 +319,54 @@ impl NetProber {
         };
         let latency = started.elapsed();
 
+        let health = Health::Open { latency };
         let banner = read_banner(&stream, self.banner_window);
-        if banner.is_some() {
+        if let Some(greeting) = banner {
+            // It spoke first. Whether that greeting is the protocol we expected
+            // is the same question, asked of a different set of bytes.
+            let confirmed = target
+                .handshake
+                .as_deref()
+                .map(|name| handshake::confirms(name, &greeting));
             return Observation {
-                health: Health::Open { latency },
-                banner,
+                health,
+                banner: Some(greeting),
+                confirmed,
+                certificate: None,
             };
         }
 
         // Silent. If the signature named a handshake, this is where it is worth
         // spending a round trip.
-        if let Some(name) = &target.handshake
-            && let Some(reply) = handshake::run(name, &stream, self.banner_window)
-        {
+        let Some(name) = &target.handshake else {
             return Observation {
-                health: Health::Open { latency },
-                banner: Some(reply),
+                health,
+                banner: None,
+                confirmed: None,
+                certificate: None,
             };
-        }
-        Observation {
-            health: Health::Open { latency },
-            banner: None,
+        };
+        match handshake::run(name, &stream, self.banner_window) {
+            Some(reply) => Observation {
+                confirmed: Some(handshake::confirms(name, &reply)),
+                health,
+                banner: Some(reply),
+                certificate: None,
+            },
+            // We knew the question and it did not answer. That is not nothing:
+            // a PostgreSQL that ignores an SSLRequest is not a PostgreSQL.
+            None if handshake::is_known(name) => Observation {
+                health,
+                banner: None,
+                confirmed: Some(false),
+                certificate: None,
+            },
+            None => Observation {
+                health,
+                banner: None,
+                confirmed: None,
+                certificate: None,
+            },
         }
     }
 }
@@ -410,6 +472,8 @@ impl Pool {
                         port: target.port,
                         health: observed.health,
                         banner: observed.banner,
+                        confirmed: observed.confirmed,
+                        certificate: observed.certificate,
                     };
                     if out.send(outcome).is_err() {
                         return;
