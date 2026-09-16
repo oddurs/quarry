@@ -1,0 +1,14 @@
+ quarry  5 listening · 0 projects                                                                    updated just now
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+╭ Services · ungrouped, newest first ──────────────────────────────────╮╭ Detail ────────────────────────────────────╮
+│  ●  3000 next-server                                 web  200   12ms ││ ▲ acme-web                                 │
+│▌ ▲  3001 node worker.js                              api  503  8.0ms ││   node worker.js · api · pid 13001         │
+│  ●  5432 postgres                                     db  open 0.4ms ││                                            │
+│  ✕  6379 redis-server                              cache  no answer  ││ ADDRESS                                    │
+│  ●  8000 python3 uvicorn                             api  200   31ms ││   http://localhost:3001  ↗                 │
+│                                                                      ││                                            │
+│                                                                      ││ HEALTH                                     │
+│                                                                      ││   ▲ 503 Unavailable · 8.0ms                │
+│                                                                      ││                                            │
+╰──────────────────────────────────────────────────────────────────────╯╰────────────────────────────────────────────╯
+ ↑↓ move  ↵ open  y copy  / filter  a all  . here  K stop  R restart  r refresh  ? help

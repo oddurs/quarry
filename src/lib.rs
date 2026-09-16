@@ -18,6 +18,7 @@ pub mod engine;
 pub mod exec;
 pub mod handshake;
 pub mod keys;
+pub mod lifecycle;
 pub mod lsof;
 pub mod model;
 pub mod probe;
