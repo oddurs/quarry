@@ -60,7 +60,7 @@ impl Default for Config {
             refresh_secs: 6,
             connect_ms: 400,
             request_ms: 1800,
-            probe_workers: 12,
+            probe_workers: crate::probe::WORKERS,
             max_body_kb: 96,
             banner_ms: 250,
             ports: BTreeMap::new(),

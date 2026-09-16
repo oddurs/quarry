@@ -572,6 +572,8 @@ fn probe_all(config: &Config, servers: &[quarry::model::Server]) -> Vec<quarry::
                 .clone()
                 .unwrap_or_else(|| config.health_path(l.port).to_string());
             target.handshake = s.handshake.clone();
+            target.named = s.service.is_some();
+            target.silent_before = s.silent;
             if pool.submit(target) {
                 expected += 1;
             }

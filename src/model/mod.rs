@@ -66,6 +66,10 @@ pub struct Server {
     pub certificate: Option<crate::certificate::Certificate>,
     /// The command that started this and at least one other service.
     pub launcher: Option<Launcher>,
+    /// True once this socket has been given the chance to introduce itself and
+    /// has not taken it. Carried across scans, so the wait is paid once rather
+    /// than every six seconds for the life of the process.
+    pub silent: bool,
     /// The container behind this port, where the runtime published one.
     pub container: Option<crate::docker::Container>,
     pub started_at: u64,

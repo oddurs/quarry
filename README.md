@@ -254,6 +254,21 @@ to do, because that differs by what owns the service:
   again, detached, with its output appended to
   `~/.local/state/quarry/<command>.log`.
 
+### What a refresh costs
+
+The first one is the expensive one, deliberately. quarry gives every socket a
+quarter of a second to introduce itself, because a banner is the one thing that
+names a service nothing else can name. After that it remembers: a socket that
+declined the invitation is not asked again, and a service the signature table
+already names is never asked at all. On a machine with a hundred listening
+sockets that is the difference between half a second per refresh and five
+milliseconds.
+
+The container runtime is asked when the set of listening ports changes, or once
+a minute — not every scan. A Docker daemon on macOS lives behind a VM boundary
+and takes twenty to thirty milliseconds to answer, which was more than
+everything else in a scan put together.
+
 ## How it works
 
 - **Every transport**, not just TCP: unix domain sockets and bound UDP ports

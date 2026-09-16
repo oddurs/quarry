@@ -60,6 +60,10 @@ pub struct Signature {
     pub ports: Vec<u16>,
     /// Substrings, or globs, matched against the command and its arguments.
     pub process: Vec<String>,
+    /// The letters every process pattern needs, one mask per pattern, in the
+    /// same order. Computed once when the table is loaded rather than for
+    /// every service on every scan.
+    process_letters: Vec<u64>,
     /// Bytes the service sends unprompted on connect.
     pub banner: Option<Vec<u8>>,
     pub http_server: Option<String>,
@@ -258,6 +262,29 @@ fn basenames(cmdline: &str) -> String {
 }
 
 /// The case-folded evidence, computed once per lookup.
+/// Which of twenty-six letters and ten digits a string contains, as a mask.
+///
+/// A signature's process patterns cannot occur in a command line that is
+/// missing one of their letters, and that is one `AND` to find out. The table
+/// has five hundred and sixty signatures and a command line rarely matches any
+/// of them, so almost all of the work was substring searches that could not
+/// have succeeded.
+fn letters(text: &str) -> u64 {
+    let mut mask = 0u64;
+    for b in text.bytes() {
+        let bit = match b {
+            b'a'..=b'z' => b - b'a',
+            b'A'..=b'Z' => b - b'A',
+            b'0'..=b'9' => 26 + (b - b'0'),
+            // Everything else — separators, punctuation — is too common to
+            // narrow anything and is left out of the mask entirely.
+            _ => continue,
+        };
+        mask |= 1 << bit;
+    }
+    mask
+}
+
 struct Folded {
     command: String,
     /// argv[0], reduced to its name.
@@ -269,15 +296,19 @@ struct Folded {
     interpreter: bool,
     http_server: Option<String>,
     http_title: Option<String>,
+    /// Every letter appearing anywhere a process pattern is matched against.
+    letters: u64,
 }
 
 impl Folded {
     fn new(evidence: &Evidence) -> Folded {
         let cmdline = basenames(&evidence.cmdline.to_lowercase());
         let (program, arguments) = cmdline.split_once(' ').unwrap_or((cmdline.as_str(), ""));
+        let command = evidence.command.to_lowercase();
         Folded {
             interpreter: is_interpreter(program),
-            command: evidence.command.to_lowercase(),
+            letters: letters(&command) | letters(&cmdline),
+            command,
             program: program.to_string(),
             arguments: arguments.to_string(),
             http_server: evidence.http_server.map(str::to_lowercase),
@@ -335,19 +366,24 @@ fn score(sig: &Signature, evidence: &Evidence, folded: &Folded, index: usize) ->
         score += W_SERVER;
         reasons.push(format!("server {pattern:?}"));
     }
-    if !sig.process.is_empty() {
-        if let Some(hit) = sig
-            .process
+    // Only the patterns whose letters are all present can possibly occur. On a
+    // table of five hundred signatures this rejects nearly all of them for the
+    // cost of one `AND` each, and the substring searches that remain are the
+    // ones that might have succeeded.
+    let possible = || {
+        sig.process
             .iter()
+            .zip(sig.process_letters.iter())
+            .filter(|(_, needed)| **needed & !folded.letters == 0)
+            .map(|(pattern, _)| pattern)
+    };
+    if !sig.process.is_empty() {
+        if let Some(hit) = possible()
             .find(|p| process_match(p, &folded.command) || process_match(p, &folded.program))
         {
             score += W_PROCESS;
             reasons.push(format!("process {hit:?}"));
-        } else if let Some(hit) = sig
-            .process
-            .iter()
-            .find(|p| process_match(p, &folded.arguments))
-        {
+        } else if let Some(hit) = possible().find(|p| process_match(p, &folded.arguments)) {
             let weight = if folded.interpreter {
                 W_PROCESS
             } else {
@@ -449,12 +485,19 @@ fn parse(body: &str, origin: Origin) -> Result<Vec<Signature>, String> {
             (None, Some(text)) => Some(text.as_bytes().to_vec()),
             (None, None) => None,
         };
+        // Folded at load so the hot path never has to.
+        let process: Vec<String> = entry.process.iter().map(|p| p.to_lowercase()).collect();
         out.push(Signature {
             name: entry.name,
             kind,
             ports: entry.ports,
-            // Folded at load so the hot path never has to.
-            process: entry.process.iter().map(|p| p.to_lowercase()).collect(),
+            // A glob can match text the pattern does not contain, so its mask
+            // is empty: it is never rejected, only ever searched for.
+            process_letters: process
+                .iter()
+                .map(|p| if p.contains('*') { 0 } else { letters(p) })
+                .collect(),
+            process,
             banner,
             http_server: entry.http_server,
             http_title: entry.http_title,

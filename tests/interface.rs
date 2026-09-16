@@ -1190,3 +1190,67 @@ mod process_tree {
         assert_eq!(shape(&app), vec!["group acme-web"]);
     }
 }
+
+/// 0050 — the banner window is the most expensive thing a probe does, and most
+/// of what a developer machine listens on will never use it.
+mod listening_once {
+    use super::*;
+    use quarry::model::Health;
+
+    fn after_a_probe(banner: Option<Vec<u8>>) -> App {
+        let mut app = App::new();
+        app.ingest(vec![server(4242, "something").build()]);
+        app.apply_health(
+            10_000 + 4242,
+            4242,
+            Health::Open {
+                latency: Duration::from_micros(100),
+            },
+            banner,
+            None,
+            None,
+        );
+        app
+    }
+
+    fn only(app: &App) -> &Server {
+        app.servers.first().expect("the service")
+    }
+
+    /// A socket given the window once and saying nothing is not asked again.
+    #[test]
+    fn a_socket_that_says_nothing_is_remembered_as_silent() {
+        assert!(only(&after_a_probe(None)).silent);
+    }
+
+    #[test]
+    fn one_that_greets_is_not() {
+        assert!(!only(&after_a_probe(Some(b"SSH-2.0-OpenSSH".to_vec()))).silent);
+    }
+
+    /// Carried across scans — that is the whole point, since a scan happens
+    /// every few seconds for as long as quarry is open.
+    #[test]
+    fn silence_survives_a_rescan() {
+        let mut app = after_a_probe(None);
+        assert!(only(&app).silent);
+        app.ingest(vec![server(4242, "something").build()]);
+        assert!(
+            only(&app).silent,
+            "the wait would be paid again on every scan"
+        );
+    }
+
+    /// But a socket that appears anew is a new socket, and gets asked.
+    #[test]
+    fn a_different_service_on_the_port_is_asked_again() {
+        let mut app = after_a_probe(None);
+        let mut fresh = server(4242, "something").build();
+        fresh.pid = 999_999;
+        app.ingest(vec![fresh]);
+        assert!(
+            !only(&app).silent,
+            "a new process inherited the silence of the one it replaced"
+        );
+    }
+}

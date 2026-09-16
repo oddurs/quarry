@@ -5,7 +5,8 @@
 //! same code path runs with no machine underneath it, which is how the
 //! discovery tests work.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::time::{Duration, Instant};
 
 use crate::diag;
 use crate::model::{Kind, Launcher, Listener, Rules, Server, classify};
@@ -30,6 +31,11 @@ pub struct Engine {
     /// Set when a test pinned the container list, so a scan does not go and
     /// ask a real runtime what is running.
     pinned_containers: bool,
+    /// The listening ports as of the last runtime query. A container cannot
+    /// appear or vanish without a published port doing the same, so an
+    /// unchanged set means the answer we already have is still the answer.
+    ports_when_asked: Option<BTreeSet<u16>>,
+    asked_at: Option<Instant>,
     scans: u64,
 }
 
@@ -57,6 +63,8 @@ impl Engine {
             containers: Default::default(),
             tunnels: Default::default(),
             pinned_containers: false,
+            ports_when_asked: None,
+            asked_at: None,
             scans: 0,
         }
     }
@@ -145,13 +153,8 @@ impl Engine {
             self.repos.clear();
         }
 
-        // Asked once per scan, not once per port.
-        if !self.pinned_containers {
-            self.containers = crate::docker::Containers::query();
-        }
-        self.tunnels = crate::tunnel::Tunnels::query();
-
         let found = self.listening()?;
+        self.refresh_runtimes(&found);
         let pids: Vec<u32> = found.holders.keys().copied().collect();
         let info = self.process_table(pids.clone());
         let launchers = self.launchers(&pids, &info);
@@ -172,6 +175,45 @@ impl Engine {
             warnings: found.warnings,
             truncated: found.truncated,
         })
+    }
+
+    /// Ask the container runtime and the tunnel agent what they are publishing
+    /// — but only when the answer can have changed.
+    ///
+    /// This is the most expensive thing in a scan by a wide margin. A Docker
+    /// daemon on macOS lives behind a VM boundary and takes twenty to thirty
+    /// milliseconds to list its containers; the rest of a scan is two. Asking
+    /// every six seconds for an answer that changes once an hour was most of
+    /// what quarry spent its time on.
+    ///
+    /// A container cannot appear or vanish without a published port doing the
+    /// same, and the ports are already in hand — so an unchanged set of ports
+    /// means the answer we have is still the answer. The interval is a
+    /// backstop for what that misses: a container replaced on the same port,
+    /// or renamed.
+    fn refresh_runtimes(&mut self, found: &Listening) {
+        let ports: BTreeSet<u16> = found
+            .holders
+            .values()
+            .flat_map(|h| h.listeners.iter())
+            .map(|l| l.port)
+            .filter(|p| *p != 0)
+            .collect();
+
+        let changed = self.ports_when_asked.as_ref() != Some(&ports);
+        let stale = self
+            .asked_at
+            .is_none_or(|at| at.elapsed() >= RUNTIME_INTERVAL);
+        if !changed && !stale {
+            return;
+        }
+
+        if !self.pinned_containers {
+            self.containers = crate::docker::Containers::query();
+        }
+        self.tunnels = crate::tunnel::Tunnels::query();
+        self.ports_when_asked = Some(ports);
+        self.asked_at = Some(Instant::now());
     }
 
     /// Every listening socket, gathered by the process holding it.
@@ -473,6 +515,7 @@ impl Engine {
             exposed,
             certificate: None,
             launcher: launchers.get(&pid).cloned(),
+            silent: false,
             evidence: verdict.map(|v| v.reasons.clone()).unwrap_or_default(),
             container,
             started_at: i.started_at,
@@ -516,6 +559,12 @@ impl Engine {
         }
     }
 }
+
+/// How long an answer from a container runtime is reused when nothing about
+/// the listening ports has changed. Long enough that a quiet machine stops
+/// paying for it; short enough to catch a container swapped in on the port its
+/// predecessor was using.
+const RUNTIME_INTERVAL: Duration = Duration::from_secs(60);
 
 /// How far up a parent chain is worth walking. A service started from a shell
 /// in a terminal in a session is three or four deep; anything past this is the

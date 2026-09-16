@@ -235,6 +235,9 @@ impl App {
                 Some(prev) => {
                     s.health = prev.health.clone();
                     s.appeared = prev.appeared;
+                    // A socket that has already declined to introduce itself
+                    // is not asked again for as long as it is the same socket.
+                    s.silent = prev.silent;
                 }
                 // The first scan is not news. Marking every service on the
                 // machine as new would be true and useless.
@@ -367,6 +370,7 @@ impl App {
             // was not the answer, the number on the socket is the only thing
             // still claiming it is what it says.
             server.unconfirmed = confirmed == Some(false);
+            server.silent = banner.is_none();
             // Kept across a scan that did not look: a service does not stop
             // having a certificate because this probe took the other branch.
             if certificate.is_some() {

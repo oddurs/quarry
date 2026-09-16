@@ -26,7 +26,16 @@ pub const HTTP_TIMEOUT: Duration = Duration::from_millis(1800);
 /// the first pass could not identify. OrbStack's sshd, behind a VM boundary,
 /// needed about 50ms; 250 leaves room for something slower.
 pub const BANNER_WINDOW: Duration = Duration::from_millis(250);
-pub const WORKERS: usize = 12;
+
+/// How many probes run at once.
+///
+/// Not a CPU count. Every one of these threads spends its life blocked on a
+/// socket read — waiting out a banner window, or a connect that will not
+/// answer — so the right number is set by how much waiting there is to overlap,
+/// not by how many cores there are. On a machine with a hundred listening
+/// sockets, twelve workers meant a refresh took the better part of two seconds
+/// while almost nothing ran.
+pub const WORKERS: usize = 48;
 /// Beyond this many queued probes we start dropping, rather than building a
 /// backlog the user will never see the results of.
 pub const MAX_QUEUE: usize = 4096;
@@ -47,6 +56,22 @@ pub struct Target {
     /// A named handshake from the signature table, for protocols that will not
     /// speak until spoken to.
     pub handshake: Option<String>,
+    /// Whether the scan already knows what this is.
+    ///
+    /// A service the signature table has named gains nothing from being given
+    /// a quarter of a second to introduce itself — and that quarter second,
+    /// paid by every silent socket on the machine, was most of what a refresh
+    /// cost.
+    pub named: bool,
+    /// Whether this socket has already been given the window once and said
+    /// nothing.
+    ///
+    /// Most of what a developer machine is listening on — an editor's IPC
+    /// socket, a file-watching daemon, a vendor's update helper — will never
+    /// introduce itself. Waiting for it a second time buys exactly what the
+    /// first wait bought. A socket that appears anew is asked again, because
+    /// it is a new socket.
+    pub silent_before: bool,
 }
 
 impl Target {
@@ -61,6 +86,8 @@ impl Target {
             socket_path: None,
             path: "/".to_string(),
             handshake: None,
+            named: false,
+            silent_before: false,
         }
     }
 
@@ -75,6 +102,8 @@ impl Target {
             kind,
             path: "/".to_string(),
             handshake: None,
+            named: false,
+            silent_before: false,
         }
     }
 }
@@ -277,6 +306,24 @@ impl Prober for NetProber {
 }
 
 impl NetProber {
+    /// How long to let this particular service introduce itself.
+    ///
+    /// Nothing at all when the scan already named it and no handshake is
+    /// waiting on the answer. A greeting from something we can already name
+    /// tells us what we know, and the wait is the single most expensive thing
+    /// a probe does.
+    fn banner_for(&self, target: &Target) -> Duration {
+        // A handshake is a question we are waiting on the answer to, so it
+        // always gets the window.
+        if target.handshake.is_some() {
+            return self.banner_window;
+        }
+        if target.named || target.silent_before {
+            return Duration::ZERO;
+        }
+        self.banner_window
+    }
+
     /// A unix socket is dialled by path. Everything else about it is the same:
     /// connect, listen for a greeting, ask if we know how.
     fn probe_unix(&self, target: &Target) -> Observation {
@@ -293,8 +340,9 @@ impl NetProber {
         };
         let latency = started.elapsed();
 
-        if !self.banner_window.is_zero() {
-            let _ = stream.set_read_timeout(Some(self.banner_window));
+        let window = self.banner_for(target);
+        if !window.is_zero() {
+            let _ = stream.set_read_timeout(Some(window));
             let mut buf = [0u8; 256];
             if let Ok(n) = (&stream).read(&mut buf)
                 && n > 0
@@ -320,7 +368,7 @@ impl NetProber {
         let latency = started.elapsed();
 
         let health = Health::Open { latency };
-        let banner = read_banner(&stream, self.banner_window);
+        let banner = read_banner(&stream, self.banner_for(target));
         if let Some(greeting) = banner {
             // It spoke first. Whether that greeting is the protocol we expected
             // is the same question, asked of a different set of bytes.

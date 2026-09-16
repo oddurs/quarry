@@ -205,6 +205,8 @@ fn run(
                             .clone()
                             .unwrap_or_else(|| config.health_path(l.port));
                         target.handshake = s.handshake.clone();
+                        target.named = s.service.is_some();
+                        target.silent_before = s.silent;
                         pool.submit(target);
                     }
                 }

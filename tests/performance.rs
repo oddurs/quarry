@@ -363,3 +363,77 @@ fn the_proc_source_beats_lsof_by_an_order_of_magnitude() {
         );
     }
 }
+
+/// 0050 — what a refresh costs after the first one.
+///
+/// The first refresh has to listen to every socket once; every one after it
+/// should cost almost nothing. This is the number a person actually feels,
+/// because it repeats every six seconds for as long as quarry is open.
+#[test]
+fn a_refresh_is_cheap_once_the_machine_is_known() {
+    use quarry::app::App;
+    use quarry::engine::Engine;
+    use quarry::probe::{NetProber, Pool, Target, WORKERS};
+    use std::sync::Arc;
+
+    let mut engine = Engine::live();
+    let mut app = App::new();
+    app.ingest(engine.scan().expect("a scan of this machine").servers);
+
+    let round = |app: &mut App| -> (Duration, usize) {
+        let pool = Pool::with_workers(Arc::new(NetProber::default()), WORKERS);
+        let started = Instant::now();
+        let mut submitted = 0;
+        for s in &app.servers {
+            if let Some(l) = s.listeners.first() {
+                let mut t = Target::from_listener(s.pid, l, s.kind);
+                t.path = s.health_path.clone().unwrap_or_else(|| "/".to_string());
+                t.handshake = s.handshake.clone();
+                t.named = s.service.is_some();
+                t.silent_before = s.silent;
+                if pool.submit(t) {
+                    submitted += 1;
+                }
+            }
+        }
+        let outcomes = pool.collect(submitted, Duration::from_secs(10));
+        let waited = started.elapsed();
+        for o in outcomes {
+            app.apply_health(
+                o.pid,
+                o.port,
+                o.health,
+                o.banner,
+                o.confirmed,
+                o.certificate,
+            );
+        }
+        (waited, submitted)
+    };
+
+    let (first, n) = round(&mut app);
+    let (second, _) = round(&mut app);
+    println!("\nrefresh:");
+    println!(
+        "  {:<44} {first:>9.3?}  ({n} services)",
+        "first, listening to everything"
+    );
+    println!("  {:<44} {second:>9.3?}", "steady state");
+
+    if n < 8 {
+        println!("  only {n} services here; too few to say anything");
+        return;
+    }
+    // Generous against the measured 5ms, because CI runners are slow and
+    // shared. The line this holds is the old behaviour, which was 500ms.
+    assert!(
+        second < Duration::from_millis(250),
+        "a steady-state refresh took {second:?} over {n} services — \
+         every silent socket is being waited on again"
+    );
+    assert!(
+        second * 2 < first || first < Duration::from_millis(50),
+        "the first refresh ({first:?}) should be the expensive one, \
+         not every one ({second:?})"
+    );
+}
