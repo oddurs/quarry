@@ -309,3 +309,56 @@ fn the_native_socket_source_beats_lsof_by_an_order_of_magnitude() {
     }
     assert!(!ours.is_empty(), "the native source found nothing at all");
 }
+
+/// The same claim on Linux, where the fallback is the same `lsof` and the
+/// native path is four files instead of a process.
+#[cfg(target_os = "linux")]
+#[test]
+fn the_proc_source_beats_lsof_by_an_order_of_magnitude() {
+    use quarry::source::SocketSource;
+
+    let mut native = quarry::linux::Proc::default();
+    let mut lsof = quarry::lsof::Lsof;
+
+    let _ = native.listening();
+    let _ = lsof.listening();
+
+    let started = Instant::now();
+    let ours = native.listening().expect("/proc is readable on Linux");
+    let native_time = started.elapsed();
+
+    // Not having `lsof` is the situation this source exists for, so its
+    // absence is not a failure of this test.
+    let started = Instant::now();
+    let Ok(theirs) = lsof.listening() else {
+        println!("  lsof unavailable here; nothing to compare against");
+        return;
+    };
+    let lsof_time = started.elapsed();
+
+    println!("\nsocket source:");
+    println!(
+        "  {:<44} {native_time:>9.3?}  ({} sockets)",
+        "native (/proc)",
+        ours.len()
+    );
+    println!(
+        "  {:<44} {lsof_time:>9.3?}  ({} sockets)",
+        "lsof",
+        theirs.len()
+    );
+
+    if theirs.len() >= 8 {
+        assert!(
+            native_time * 3 < lsof_time,
+            "/proc {native_time:?} vs lsof {lsof_time:?} over {} sockets — \
+             the native path is not paying for itself",
+            theirs.len()
+        );
+    } else {
+        println!(
+            "  only {} sockets here; too few to compare fairly",
+            theirs.len()
+        );
+    }
+}

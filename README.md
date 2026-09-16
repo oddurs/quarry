@@ -261,11 +261,18 @@ to do, because that differs by what owns the service:
   of dozen ports, and a great deal of local software — the Docker daemon,
   PostgreSQL, PHP-FPM, anything using socket activation — is reachable only
   through one. They live behind `--all` with the rest of the background.
-- **Sockets** come from the kernel directly, through `libproc` — the same
-  interface `lsof` uses, without spawning it or parsing its output back. That is
-  about forty times faster (a scan is 5 ms rather than 110 ms) and removes the
-  one binary quarry depended on. `lsof` stays as the fallback; `quarry --doctor`
-  says which path is live.
+- **Sockets** come from the kernel directly. On macOS that is `libproc`, the
+  same interface `lsof` uses, without spawning it or parsing its output back; on
+  Linux it is `/proc/net/tcp` and its siblings, joined to `/proc/<pid>/fd` by
+  socket inode. Either way it is about forty times faster than shelling out (a
+  scan is 5 ms rather than 110 ms) and removes the one binary quarry depended
+  on — which is not installed on a good many container images. `lsof` stays as
+  the fallback; `quarry --doctor` says which path is live.
+- **A container's listeners are in its own network namespace**, and a namespace
+  quarry is not in is one it cannot read. They do not appear in the host's
+  `/proc/net/tcp` at all. This is why quarry asks the container runtime
+  separately, and why a published port is attributed through the daemon rather
+  than found by looking.
 - **Process detail** comes from `sysinfo`; a second batched `lsof` fills in any
   working directory it could not read.
 - **Projects** come from the working directory: the repository it sits in, or

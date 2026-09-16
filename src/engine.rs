@@ -103,6 +103,16 @@ impl Engine {
                 "the kernel would not enumerate processes; falling back to lsof",
             );
         }
+        #[cfg(target_os = "linux")]
+        {
+            if crate::linux::available() {
+                return Box::new(crate::linux::Proc::default());
+            }
+            diag::warn(
+                "engine",
+                "no readable /proc on this machine; falling back to lsof",
+            );
+        }
         Box::new(crate::lsof::Lsof)
     }
 

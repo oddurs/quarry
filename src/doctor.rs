@@ -60,7 +60,9 @@ pub fn run(config: &Config, config_path: Option<&std::path::Path>, theme: &Theme
     // without this the type is never inferred on some platforms.
     let mut checks: Vec<Check> = vec![socket_source()];
 
-    #[cfg(target_os = "macos")]
+    // Both platforms have a native source now, and `lsof` is the fallback for
+    // each. Saying which one is live is the whole point of the check.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     checks.push(lsof_fallback(checks[0].ok));
 
     let (rules, rule_problems) = crate::model::Rules::from_config(&config.ports, &config.names);
@@ -95,7 +97,7 @@ fn socket_source() -> Check {
 }
 
 /// The fallback, where there is a native path to fall back from.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn lsof_fallback(native_ok: bool) -> Check {
     // Needed to call `listening` on the concrete `Lsof`; a trait object does
     // not require it, which is why this is not at the top of the file.
