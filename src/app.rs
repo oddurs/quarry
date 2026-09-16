@@ -8,13 +8,19 @@ use ratatui::layout::Rect;
 
 use crate::diag;
 use crate::keys::{Command, Keymap};
-use crate::model::{GroupSource, Health, Rules, Server};
+use crate::lifecycle::{Op, Target};
+use crate::model::{GroupBy, GroupSource, Health, Query, Rules, Scope, Server, SortBy};
 use crate::signature::{Evidence, Registry};
 use crate::theme::Theme;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Row {
     Group(usize),
+    /// A command that started several of the services beneath it. Nested
+    /// inside its project rather than replacing it: both facts are true, and
+    /// which repository something belongs to does not stop mattering because
+    /// you also know what launched it.
+    Launcher(usize),
     Server(usize),
 }
 
@@ -34,10 +40,15 @@ pub enum Action {
     Open(String),
     /// Put text on the system clipboard.
     Copy(String),
-    /// Signal a process. Only ever produced after an explicit confirmation.
-    Signal {
-        pid: u32,
-        force: bool,
+    /// Stop, restart or kill a service. Only ever produced after an explicit
+    /// confirmation, and always carried out on a worker: a stop waits on a
+    /// grace period, and the UI must not wait with it.
+    Lifecycle {
+        /// More than one when a whole group was selected. A worktree is a unit
+        /// people think in — "restart this branch" — and doing it one row at a
+        /// time is four confirmations for one intention.
+        targets: Vec<Target>,
+        op: Op,
     },
 }
 
@@ -48,9 +59,21 @@ pub enum ToastKind {
     Bad,
 }
 
+/// A command several services on screen came from.
+pub struct LauncherRow {
+    pub pid: u32,
+    pub command: String,
+    pub count: usize,
+}
+
 pub struct Group {
     pub key: String,
     pub source: GroupSource,
+    /// Whether `source` says anything about this heading. Grouped by kind, the
+    /// key is the whole name — and the source belongs to whichever member
+    /// sorted first, which would have rendered two different kinds as "no
+    /// project" because neither had one.
+    pub describes_a_project: bool,
     pub branch: Option<String>,
     pub remote: Option<String>,
     pub count: usize,
@@ -71,14 +94,17 @@ pub struct Confirm {
     pub action: PendingAction,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub enum PendingAction {
-    Kill { pid: u32, force: bool },
+    Lifecycle { targets: Vec<Target>, op: Op },
 }
 
 pub struct App {
     pub servers: Vec<Server>,
     pub groups: Vec<Group>,
+    /// Subgroups, in the order they appear. Flat rather than nested under
+    /// `groups`: a row indexes one of these directly, as it does a group.
+    pub launchers: Vec<LauncherRow>,
     pub rows: Vec<Row>,
     /// Which group each server belongs to, by server index. Rebuilt with the
     /// rows, so a health update can adjust one counter instead of re-deriving
@@ -93,7 +119,19 @@ pub struct App {
     pub collapsed: HashSet<String>,
     pub search: String,
     pub searching: bool,
+    /// Whether the detail pane is on screen. The list is what you read; the
+    /// detail is what you look up, so it can get out of the way.
+    pub detail: bool,
+    /// How the list is divided, and the order within each division.
+    pub group_by: GroupBy,
+    pub sort_by: SortBy,
     pub show_all: bool,
+    /// The repository quarry was started in, if it was started in one. Found
+    /// once: the working directory cannot change while it runs.
+    pub scope: Option<Scope>,
+    /// Whether that scope is being applied. Separate from `scope` so the key
+    /// that turns it off can turn it back on without another look at the disk.
+    pub here: bool,
     pub help: bool,
     pub mouse: bool,
     pub scanning: bool,
@@ -141,6 +179,7 @@ impl App {
         Self {
             servers: Vec::new(),
             groups: Vec::new(),
+            launchers: Vec::new(),
             rows: Vec::new(),
             group_of: Vec::new(),
             by_pid: HashMap::new(),
@@ -149,7 +188,12 @@ impl App {
             collapsed: HashSet::new(),
             search: String::new(),
             searching: false,
+            detail: true,
+            group_by: GroupBy::default(),
+            sort_by: SortBy::default(),
             show_all: false,
+            scope: None,
+            here: false,
             help: false,
             mouse: true,
             scanning: true,
@@ -176,14 +220,48 @@ impl App {
 
         // Carry health forward so rows do not blink back to "checking" on every
         // refresh; the probe results for the new scan overwrite it shortly.
+        //
+        // The same walk answers what changed. quarry rescans every few seconds
+        // and has always known exactly what appeared and vanished; saying so is
+        // the difference between a tool you run and one you leave open.
+        let watching = self.last_scan.is_some();
+        let now = Instant::now();
         for s in fresh.iter_mut() {
-            if let Some(prev) = self
+            match self
                 .servers
                 .iter()
                 .find(|p| p.pid == s.pid && p.primary_port() == s.primary_port())
             {
-                s.health = prev.health.clone();
+                Some(prev) => {
+                    s.health = prev.health.clone();
+                    s.appeared = prev.appeared;
+                }
+                // The first scan is not news. Marking every service on the
+                // machine as new would be true and useless.
+                None => s.appeared = watching.then_some(now),
             }
+        }
+
+        let gone: Vec<String> = self
+            .servers
+            .iter()
+            .filter(|p| {
+                !fresh
+                    .iter()
+                    .any(|s| s.pid == p.pid && s.primary_port() == p.primary_port())
+            })
+            .map(|p| format!("{} {}", p.title(), p.primary_label()))
+            .collect();
+        if watching && !gone.is_empty() {
+            // A departure leaves no row to mark, so it has to be said once
+            // rather than shown. Two names and a count, because a toast
+            // listing nine services is a toast nobody finishes reading.
+            let text = match gone.len() {
+                1 => format!("{} stopped", gone[0]),
+                2 => format!("{} and {} stopped", gone[0], gone[1]),
+                n => format!("{}, {} and {} more stopped", gone[0], gone[1], n - 2),
+            };
+            self.toast(text, ToastKind::Info);
         }
 
         self.by_pid.clear();
@@ -219,7 +297,15 @@ impl App {
     /// introduce itself, or read a title off its own page. Both outrank a port,
     /// so the answer can improve here — never silently, since the detail pane
     /// shows what the verdict rested on.
-    pub fn apply_health(&mut self, pid: u32, port: u16, health: Health, banner: Option<Vec<u8>>) {
+    pub fn apply_health(
+        &mut self,
+        pid: u32,
+        port: u16,
+        health: Health,
+        banner: Option<Vec<u8>>,
+        confirmed: Option<bool>,
+        certificate: Option<crate::certificate::Certificate>,
+    ) {
         let Some(indices) = self.by_pid.get(&pid) else {
             return;
         };
@@ -236,7 +322,7 @@ impl App {
             let Some(server) = self.servers.get_mut(i) else {
                 continue;
             };
-            if !server.listeners.iter().any(|l| l.port == port) {
+            if !server.answers(pid, port) {
                 continue;
             }
 
@@ -276,8 +362,35 @@ impl App {
 
             // Adjust the one counter this changes rather than recomputing every
             // group; the alternative is quadratic in the number of services.
+            // A port is a convention and a handshake is proof. When quarry
+            // asked the question this protocol answers and got something that
+            // was not the answer, the number on the socket is the only thing
+            // still claiming it is what it says.
+            server.unconfirmed = confirmed == Some(false);
+            // Kept across a scan that did not look: a service does not stop
+            // having a certificate because this probe took the other branch.
+            if certificate.is_some() {
+                server.certificate = certificate.clone();
+            }
+            if let Some(bytes) = &banner
+                && let Some(name) = &server.handshake
+            {
+                if let Some(v) = crate::handshake::version(name, bytes) {
+                    server.version = Some(v);
+                }
+                // The gRPC reply arrives on the same channel a banner does, so
+                // reading it costs nothing beyond looking.
+                if name == "grpc" {
+                    server.serving = match crate::handshake::serving(bytes) {
+                        crate::handshake::Serving::Yes => Some(true),
+                        crate::handshake::Serving::No => Some(false),
+                        crate::handshake::Serving::Unsaid => None,
+                    };
+                }
+            }
+
             let was_trouble = server.health.is_trouble();
-            server.health = health.clone();
+            server.health = reinterpreted(health.clone(), server);
             let is_trouble = server.health.is_trouble();
 
             if was_trouble != is_trouble
@@ -342,11 +455,20 @@ impl App {
                 self.selected = idx;
                 self.toggle_group();
             }
+            Some(Row::Launcher(_)) => self.selected = idx,
             None => {}
         }
     }
 
-    fn visible(&self, s: &Server, needle: &str) -> bool {
+    fn visible(&self, s: &Server, query: &Query) -> bool {
+        // Narrowing to a project is one more filter, not a different mode.
+        // `-a` has to keep meaning what it means everywhere else, or a repo
+        // with a couple of unix sockets in it looks like it has servers.
+        if let Some(scope) = self.scoped()
+            && !s.in_scope(scope)
+        {
+            return false;
+        }
         if !self.show_all && s.kind.is_background_noise() {
             return false;
         }
@@ -356,65 +478,52 @@ impl App {
         if !self.show_all && s.is_socket_only() {
             return false;
         }
-        if !needle.is_empty() && !s.matches(needle) {
+        if !query.is_empty() && !s.satisfies(query) {
             return false;
         }
         true
     }
 
+    /// Rebuild the rows from the services, the filter and the arrangement.
+    ///
+    /// Three steps, and the order matters: decide what each service is grouped
+    /// under, put the visible ones in order, then walk that order emitting a
+    /// heading whenever the group changes.
     pub fn rebuild(&mut self) {
-        // Group keys are derived from the repo, the directory and the kind, and
-        // each derivation allocates. Computing them once and sorting on the
-        // result turns O(n log n) allocations into O(n).
-        let keys: Vec<String> = self.servers.iter().map(|s| s.group_key()).collect();
-        let ranks: Vec<u8> = self
-            .servers
-            .iter()
-            .map(|s| s.group_source().rank())
-            .collect();
-
-        // Lowercased once here rather than once per service per keystroke.
-        let needle = self.search.to_lowercase();
-        let mut indices: Vec<usize> = (0..self.servers.len())
-            .filter(|i| self.visible(&self.servers[*i], &needle))
-            .collect();
-        indices.sort_by(|a, b| {
-            ranks[*a]
-                .cmp(&ranks[*b])
-                .then_with(|| keys[*a].cmp(&keys[*b]))
-                .then_with(|| {
-                    self.servers[*a]
-                        .health
-                        .rank()
-                        .cmp(&self.servers[*b].health.rank())
-                })
-                .then_with(|| {
-                    self.servers[*a]
-                        .primary_port()
-                        .cmp(&self.servers[*b].primary_port())
-                })
-        });
+        let keys = self.group_keys();
+        let order = self.ordering(&keys);
 
         self.groups.clear();
+        self.launchers.clear();
         self.rows.clear();
         self.group_of.clear();
         self.group_of.resize(self.servers.len(), usize::MAX);
 
+        // How many services in each group came from each command. A launcher
+        // that started one of them within this group is not a subgroup — it
+        // says nothing the service did not already say.
+        let mut shared: HashMap<(&str, u32), usize> = HashMap::new();
+        for i in &order {
+            if let Some(l) = &self.servers[*i].launcher {
+                *shared.entry((keys[*i].as_str(), l.pid)).or_default() += 1;
+            }
+        }
+
+        let flat = self.group_by == GroupBy::Nothing;
         let mut current: Option<&str> = None;
-        for i in indices {
+        let mut current_launcher: Option<u32> = None;
+        for i in order {
             let key = keys[i].as_str();
+            // Flat means no headings at all, not one heading over everything.
+            if flat {
+                self.rows.push(Row::Server(i));
+                continue;
+            }
             if current != Some(key) {
-                let repo = self.servers[i].repo.clone();
-                self.groups.push(Group {
-                    key: keys[i].clone(),
-                    source: self.servers[i].group_source(),
-                    branch: repo.as_ref().and_then(|r| r.branch.clone()),
-                    remote: repo.as_ref().and_then(|r| r.remote.clone()),
-                    count: 0,
-                    trouble: 0,
-                });
+                self.groups.push(self.heading(i, &keys));
                 self.rows.push(Row::Group(self.groups.len() - 1));
                 current = Some(key);
+                current_launcher = None;
             }
             let group_idx = self.groups.len() - 1;
             self.group_of[i] = group_idx;
@@ -423,11 +532,131 @@ impl App {
             if self.servers[i].health.is_trouble() {
                 g.trouble += 1;
             }
-            if !self.collapsed.contains(key) {
-                self.rows.push(Row::Server(i));
+            if self.collapsed.contains(key) {
+                continue;
             }
+
+            let launcher = self.servers[i]
+                .launcher
+                .as_ref()
+                .filter(|l| shared.get(&(key, l.pid)).is_some_and(|n| *n > 1));
+            match launcher {
+                Some(l) if current_launcher != Some(l.pid) => {
+                    self.launchers.push(LauncherRow {
+                        pid: l.pid,
+                        command: l.command.clone(),
+                        count: shared[&(key, l.pid)],
+                    });
+                    self.rows.push(Row::Launcher(self.launchers.len() - 1));
+                    current_launcher = Some(l.pid);
+                }
+                Some(_) => {}
+                None => current_launcher = None,
+            }
+            self.rows.push(Row::Server(i));
         }
         self.clamp();
+    }
+
+    /// What each service is grouped under, by index.
+    ///
+    /// Computed once and sorted on, rather than derived during the sort: every
+    /// key allocates, and deriving them inside the comparator turns O(n log n)
+    /// allocations into O(n).
+    fn group_keys(&self) -> Vec<String> {
+        // Inside one repository every service shares a project, so grouping by
+        // project would produce a single heap. The branch is what tells two of
+        // them apart, and it is what a person calls a worktree.
+        let scoped = self.scoped().is_some();
+        self.servers
+            .iter()
+            .map(|s| match self.group_by {
+                GroupBy::Kind => s.kind.label().to_string(),
+                // One key for everything: the rows still sort as one run, and
+                // the heading is simply never emitted.
+                GroupBy::Nothing => String::new(),
+                GroupBy::Project if scoped => s.worktree_key(),
+                GroupBy::Project => s.group_key(),
+            })
+            .collect()
+    }
+
+    /// The visible services, in the order they appear on screen.
+    fn ordering(&self, keys: &[String]) -> Vec<usize> {
+        // Parsed once here rather than once per service per keystroke.
+        let query = Query::parse(&self.search);
+        let mut order: Vec<usize> = (0..self.servers.len())
+            .filter(|i| self.visible(&self.servers[*i], &query))
+            .collect();
+
+        // A group holding something broken sorts first. That row was reliably
+        // the hardest to reach: unattributed services sort last by rank, and a
+        // stray broken container is exactly the kind of thing with no project.
+        let troubled: HashSet<&str> = order
+            .iter()
+            .filter(|i| self.servers[**i].health.is_trouble())
+            .map(|i| keys[*i].as_str())
+            .collect();
+        let calm = |i: usize| !troubled.contains(keys[i].as_str());
+
+        // Where the name came from only orders groups by project. Grouped by
+        // kind, or not at all, it would shuffle rows for a reason that is not
+        // on screen.
+        let rank = |i: usize| match self.group_by {
+            GroupBy::Project => self.servers[i].group_source().rank(),
+            _ => 0,
+        };
+
+        order.sort_by(|a, b| {
+            calm(*a)
+                .cmp(&calm(*b))
+                .then_with(|| rank(*a).cmp(&rank(*b)))
+                .then_with(|| keys[*a].cmp(&keys[*b]))
+                .then_with(|| self.compare(*a, *b))
+        });
+        order
+    }
+
+    /// Two services in the same group, under the chosen order.
+    fn compare(&self, a: usize, b: usize) -> std::cmp::Ordering {
+        let (x, y) = (&self.servers[a], &self.servers[b]);
+        match self.sort_by {
+            SortBy::Health => x.health.rank().cmp(&y.health.rank()),
+            SortBy::Port => std::cmp::Ordering::Equal,
+            SortBy::Name => x.service_name().cmp(&y.service_name()),
+            // Reversed: the one you just started is the one you are looking
+            // for, and it is the last to have been started.
+            SortBy::Newest => y.started_at.cmp(&x.started_at),
+        }
+        // Port always breaks the tie, so the order is total and the list does
+        // not reshuffle between two equal rows on every scan.
+        .then_with(|| x.primary_port().cmp(&y.primary_port()))
+    }
+
+    /// The heading a group gets, from the first service under it.
+    fn heading(&self, i: usize, keys: &[String]) -> Group {
+        // A heading only speaks for a project when the grouping is by project.
+        // Grouped by kind it belongs to whichever service happened to sort
+        // first, which is nobody.
+        let by_project = self.group_by == GroupBy::Project;
+        let scoped = self.scoped().is_some();
+        let repo = self.servers[i].repo.as_ref();
+        Group {
+            key: keys[i].clone(),
+            source: self.servers[i].group_source(),
+            describes_a_project: by_project,
+            // Scoped, the key is already the branch and the remote is the same
+            // for every group. Printing either again would be noise on every
+            // row.
+            branch: repo
+                .and_then(|r| r.branch.clone())
+                .filter(|_| by_project && !scoped),
+            remote: repo
+                .and_then(|r| r.remote.clone())
+                .filter(|_| by_project && !scoped),
+            count: 0,
+            trouble: 0,
+        }
     }
 
     /// Group headers are only landable when collapsed — otherwise the cursor
@@ -435,6 +664,9 @@ impl App {
     fn is_selectable(&self, idx: usize) -> bool {
         match self.rows.get(idx) {
             Some(Row::Server(_)) => true,
+            // A launcher is landable so that it can be stopped: it is the one
+            // process that takes everything under it down with it.
+            Some(Row::Launcher(_)) => true,
             Some(Row::Group(g)) => self
                 .groups
                 .get(*g)
@@ -462,11 +694,19 @@ impl App {
             .find(|i| self.is_selectable(*i))
     }
 
+    /// The launcher under the cursor, when the cursor is on one.
+    pub fn selected_launcher(&self) -> Option<&LauncherRow> {
+        match self.rows.get(self.selected)? {
+            Row::Launcher(l) => self.launchers.get(*l),
+            _ => None,
+        }
+    }
+
     /// The group under the cursor, when the cursor is on a header.
     pub fn selected_group(&self) -> Option<&Group> {
         match self.rows.get(self.selected)? {
             Row::Group(g) => self.groups.get(*g),
-            Row::Server(_) => None,
+            Row::Server(_) | Row::Launcher(_) => None,
         }
     }
 
@@ -488,7 +728,7 @@ impl App {
     pub fn selected_server(&self) -> Option<&Server> {
         match self.rows.get(self.selected)? {
             Row::Server(i) => self.servers.get(*i),
-            Row::Group(_) => None,
+            Row::Group(_) | Row::Launcher(_) => None,
         }
     }
 
@@ -523,7 +763,8 @@ impl App {
         let key = match self.rows.get(self.selected) {
             Some(Row::Group(g)) => self.groups[*g].key.clone(),
             Some(Row::Server(i)) => self.servers[*i].group_key(),
-            None => return,
+            // A launcher is not foldable; it is a heading you can act on.
+            Some(Row::Launcher(_)) | None => return,
         };
         let collapsing = !self.collapsed.contains(&key);
         if collapsing {
@@ -575,7 +816,7 @@ impl App {
         let Some(s) = self.selected_server() else {
             return Action::None;
         };
-        if s.kind.opens_in_a_browser() && !s.is_socket_only() {
+        if s.opens_in_a_browser() {
             return Action::Open(s.url());
         }
         let what = s.service_name();
@@ -587,26 +828,246 @@ impl App {
         Action::Copy(uri)
     }
 
+    /// Copy the address worth pasting.
+    ///
+    /// For an exposed service that is the public one: sharing it is the reason
+    /// it is exposed, and the local port is the piece the user already had.
+    /// Opening still goes to the local address — that is for looking at it
+    /// yourself, and the short way round is better.
     pub fn copy_selected(&mut self) -> Action {
         match self.selected_server() {
-            Some(s) => Action::Copy(s.url()),
+            Some(s) => Action::Copy(match &s.exposed {
+                Some(exposed) => exposed.public_url.clone(),
+                None => s.url(),
+            }),
             None => Action::None,
         }
     }
 
-    pub fn ask_kill(&mut self, force: bool) {
+    /// Move to the next service that is not answering, wrapping around.
+    ///
+    /// A collapsed group is expanded to get there. The alternative is a key
+    /// that reports trouble it will not show you.
+    pub fn jump_to_trouble(&mut self, forward: bool) {
+        if !self.servers.iter().any(|s| s.health.is_trouble()) {
+            self.toast("everything is answering".to_string(), ToastKind::Good);
+            return;
+        }
+        let hidden: Vec<String> = self
+            .groups
+            .iter()
+            .filter(|g| g.trouble > 0 && self.collapsed.contains(&g.key))
+            .map(|g| g.key.clone())
+            .collect();
+        if !hidden.is_empty() {
+            for key in hidden {
+                self.collapsed.remove(&key);
+            }
+            self.rebuild();
+        }
+
+        let n = self.rows.len();
+        let broken = |row: &Row| match row {
+            Row::Server(i) => self.servers[*i].health.is_trouble(),
+            Row::Group(_) | Row::Launcher(_) => false,
+        };
+        // From the row after this one, so repeated presses walk the list
+        // rather than sticking on whatever is already selected.
+        let found = (1..=n).find_map(|step| {
+            let i = if forward {
+                (self.selected + step) % n
+            } else {
+                (self.selected + n - step % n) % n
+            };
+            broken(&self.rows[i]).then_some(i)
+        });
+        if let Some(i) = found {
+            // The renderer follows the selection; nothing to scroll here.
+            self.selected = i;
+        }
+    }
+
+    /// Cycle how the list is divided. Reports the new arrangement, because
+    /// the change is easy to miss on a machine with one project.
+    pub fn cycle_group_by(&mut self) {
+        self.group_by = self.group_by.next();
+        let text = match self.group_by {
+            GroupBy::Nothing => "one flat list".to_string(),
+            other => format!("grouped by {}", other.name()),
+        };
+        // Folding is remembered by group key, and the keys are different in
+        // every arrangement. Carrying them across means a group folding itself
+        // because something with the same name was folded two modes ago.
+        self.collapsed.clear();
+        self.rebuild();
+        self.toast(text, ToastKind::Info);
+    }
+
+    pub fn cycle_sort_by(&mut self) {
+        self.sort_by = self.sort_by.next();
+        let text = match self.sort_by {
+            SortBy::Newest => "newest first".to_string(),
+            other => format!("sorted by {}", other.name()),
+        };
+        self.rebuild();
+        self.toast(text, ToastKind::Info);
+    }
+
+    /// What the list pane calls itself: the arrangement, when it is not the
+    /// default one. A mode you cannot see you are in is a bug report waiting
+    /// to happen.
+    pub fn arrangement(&self) -> Option<String> {
+        let group = (self.group_by != GroupBy::default()).then(|| match self.group_by {
+            GroupBy::Nothing => "ungrouped".to_string(),
+            other => format!("by {}", other.name()),
+        });
+        let sort = (self.sort_by != SortBy::default()).then(|| match self.sort_by {
+            SortBy::Newest => "newest first".to_string(),
+            other => format!("{} order", other.name()),
+        });
+        match (group, sort) {
+            (None, None) => None,
+            (Some(g), None) => Some(g),
+            (None, Some(s)) => Some(s),
+            (Some(g), Some(s)) => Some(format!("{g}, {s}")),
+        }
+    }
+
+    /// The scope, if one was found *and* is being applied.
+    pub fn scoped(&self) -> Option<&Scope> {
+        self.here.then_some(self.scope.as_ref()).flatten()
+    }
+
+    /// Turn the repository scope on or off. Asking to narrow to a project
+    /// while standing outside one has to fail visibly, or the screen simply
+    /// does not change and nothing explains why.
+    pub fn toggle_here(&mut self) {
+        match &self.scope {
+            None => self.toast(
+                "not in a git repository — nothing to narrow to".to_string(),
+                ToastKind::Bad,
+            ),
+            Some(scope) => {
+                let label = scope.label();
+                self.here = !self.here;
+                let text = if self.here {
+                    format!("showing {label} only")
+                } else {
+                    "showing every project".to_string()
+                };
+                self.toast(text, ToastKind::Info);
+                self.rebuild();
+            }
+        }
+    }
+
+    /// Raise the confirmation for stopping, restarting or killing what is
+    /// selected.
+    ///
+    /// The prompt names what will actually happen rather than what was pressed.
+    /// "Restart" means two different things depending on whether a daemon or
+    /// the kernel owns the service, and a confirmation that hides the
+    /// difference is not a confirmation.
+    pub fn ask(&mut self, op: Op) {
+        let verb = match op {
+            Op::Stop => "Stop",
+            Op::Restart => "Restart",
+            Op::Kill => "Force kill",
+        };
+        // The one process that takes everything under it down with it. That
+        // is the whole reason a launcher is worth showing.
+        if let Some(launcher) = self.selected_launcher() {
+            let (pid, command, count) = (launcher.pid, launcher.command.clone(), launcher.count);
+            self.confirm = Some(Confirm {
+                prompt: format!("{verb} {command}?"),
+                detail: format!(
+                    "the command {} started, and {} with it",
+                    plural(count, "service", "services"),
+                    if count == 1 { "it goes" } else { "they go" }
+                ),
+                action: PendingAction::Lifecycle {
+                    targets: vec![Target::Process { pid, port: None }],
+                    op,
+                },
+            });
+            return;
+        }
+
+        // A group heading is a selection too, and a worktree is a unit people
+        // think in: "restart this branch" rather than four rows in turn.
+        if let Some(group) = self.selected_group() {
+            let key = group.key.clone();
+            let members = self.servers_in(&key);
+            let n = members.len();
+            if n == 0 {
+                return;
+            }
+            let targets: Vec<Target> = members.iter().map(|s| s.lifecycle()).collect();
+            let containers = targets
+                .iter()
+                .filter(|t| matches!(t, Target::Container(_)))
+                .count();
+            // What is about to happen differs by who owns each service, and
+            // with several at once the honest summary is the split.
+            let detail = match (containers, n - containers) {
+                (0, _) => format!("{}, one at a time", plural(n, "process", "processes")),
+                (_, 0) => format!(
+                    "{}, through their runtime",
+                    plural(n, "container", "containers")
+                ),
+                (c, p) => format!(
+                    "{} and {}, one at a time",
+                    plural(c, "container", "containers"),
+                    plural(p, "process", "processes")
+                ),
+            };
+            self.confirm = Some(Confirm {
+                prompt: format!("{verb} all of {key}?"),
+                detail,
+                action: PendingAction::Lifecycle { targets, op },
+            });
+            return;
+        }
+
         let Some(s) = self.selected_server() else {
             return;
         };
+        let target = s.lifecycle();
+        let prompt = format!("{verb} {}?", s.title());
+        // ":8000" rather than the bare "8000" the list column shows — in a
+        // sentence the colon is what makes it read as a port.
+        let at = match s.primary() {
+            Some(l) if l.is_unix() => l.label(),
+            Some(l) => format!(":{}", l.port),
+            None => "no listener".to_string(),
+        };
+        let detail = match (&target, op) {
+            (Target::Container(c), Op::Stop) => {
+                format!("the runtime stops {} · {at}", c.display_name())
+            }
+            (Target::Container(c), Op::Restart) => {
+                format!("the runtime restarts {} · {at}", c.display_name())
+            }
+            (Target::Container(c), Op::Kill) => {
+                format!("the runtime kills {} · no grace period", c.display_name())
+            }
+            (Target::Process { pid, .. }, Op::Stop) => {
+                format!("SIGTERM {pid} · {} on {at}", s.command)
+            }
+            (Target::Process { pid, .. }, Op::Restart) => {
+                format!("SIGTERM {pid}, then start it again · {at}")
+            }
+            (Target::Process { pid, .. }, Op::Kill) => {
+                format!("SIGKILL {pid}, no clean shutdown · {at}")
+            }
+        };
         self.confirm = Some(Confirm {
-            prompt: format!(
-                "{} {} (pid {})?",
-                if force { "Force kill" } else { "Stop" },
-                s.title(),
-                s.pid
-            ),
-            detail: format!("{} on :{}", s.command, s.primary_port()),
-            action: PendingAction::Kill { pid: s.pid, force },
+            prompt,
+            detail,
+            action: PendingAction::Lifecycle {
+                targets: vec![target],
+                op,
+            },
         });
     }
 
@@ -618,7 +1079,7 @@ impl App {
             return Action::None;
         }
         match c.action {
-            PendingAction::Kill { pid, force } => Action::Signal { pid, force },
+            PendingAction::Lifecycle { targets, op } => Action::Lifecycle { targets, op },
         }
     }
 
@@ -708,8 +1169,15 @@ impl App {
                 return Action::Refresh;
             }
             Command::Reload => return Action::Reload,
-            Command::Stop => self.ask_kill(false),
-            Command::ForceKill => self.ask_kill(true),
+            Command::ToggleHere => self.toggle_here(),
+            Command::ToggleDetail => self.detail = !self.detail,
+            Command::GroupBy => self.cycle_group_by(),
+            Command::SortBy => self.cycle_sort_by(),
+            Command::NextTrouble => self.jump_to_trouble(true),
+            Command::PrevTrouble => self.jump_to_trouble(false),
+            Command::Stop => self.ask(Op::Stop),
+            Command::Restart => self.ask(Op::Restart),
+            Command::ForceKill => self.ask(Op::Kill),
             Command::Diagnostics => self.diagnostics = true,
             Command::Help => self.help = true,
             Command::ToggleMouse => {
@@ -782,12 +1250,17 @@ impl App {
                 _ => {}
             }
         }
-        let counted: usize = self.groups.iter().map(|g| g.count).sum();
-        let needle = self.search.to_lowercase();
+        // Flat has no groups to count, so the rows carry the number instead.
+        let counted: usize = if self.group_by == GroupBy::Nothing {
+            self.rows.len()
+        } else {
+            self.groups.iter().map(|g| g.count).sum()
+        };
+        let query = Query::parse(&self.search);
         let visible = self
             .servers
             .iter()
-            .filter(|s| self.visible(s, &needle))
+            .filter(|s| self.visible(s, &query))
             .count();
         if counted != visible {
             return Err(format!(
@@ -803,4 +1276,38 @@ fn unix_seconds() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+/// A service seen for the first time this recently, and not yet serving, is
+/// starting rather than broken. After it, not answering is not a phase.
+const STARTING_WINDOW: Duration = Duration::from_secs(60);
+
+/// Reinterpret a probe result for a service that has only just appeared.
+///
+/// The probe reports what it saw from the outside. Whether that is a failure
+/// depends on one thing it cannot know: whether the service existed a minute
+/// ago. A dev server binds its port immediately and then compiles for thirty
+/// seconds — from outside that is indistinguishable from a service that is
+/// broken, and the difference is the whole point of saying so.
+///
+/// Only where something was expected to answer. A newly started Redis is
+/// `open`, which is already the right and final answer for it; calling that
+/// "starting" would be a phase it never leaves.
+fn reinterpreted(health: Health, server: &Server) -> Health {
+    let answered = matches!(health, Health::Http { .. });
+    let expected_an_answer = server.kind.opens_in_a_browser() || server.health_path.is_some();
+    let just_appeared = server
+        .appeared
+        .is_some_and(|at| at.elapsed() < STARTING_WINDOW);
+
+    if !answered && expected_an_answer && just_appeared {
+        Health::Starting
+    } else {
+        health
+    }
+}
+
+/// `1 container`, `3 containers`.
+fn plural(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
 }
