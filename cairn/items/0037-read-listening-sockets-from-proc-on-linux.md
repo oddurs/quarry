@@ -2,12 +2,13 @@
 id: 37
 title: Read listening sockets from /proc on Linux
 type: feature
-status: backlog
+status: done
 milestone: v0.4
+assignee: Oddur Sigurdsson
 depends_on:
 - 28
 created: 2026-09-08
-updated: 2026-09-08
+updated: 2026-09-15
 priority: p1
 area: discovery
 effort: m
@@ -40,8 +41,16 @@ Two Linux-specific things need handling rather than ignoring:
 
 ## Acceptance criteria
 
-- [ ] a native Linux source, `lsof` still the fallback
-- [ ] the inode join is done once for all sockets, not once per socket
-- [ ] parses against captured `/proc/net/*` fixtures, so the tests run anywhere
-- [ ] `--doctor` reports which source is live, as it does on macOS
-- [ ] measured against `lsof` on Linux, with the ratio asserted as on macOS
+- [x] a native Linux source, `lsof` still the fallback
+- [x] the inode join is done once for all sockets, not once per socket
+- [x] parses against captured `/proc/net/*` fixtures, so the tests run anywhere
+- [x] `--doctor` reports which source is live, as it does on macOS
+- [x] measured against `lsof` on Linux, with the ratio asserted as on macOS
+
+## 2026-09-15
+
+The module is deliberately not gated to Linux. Only choosing the source is platform-specific; the parsers are pure functions over text, and a captured /proc tree is readable from anywhere — so Proc::at(dir) points at a fixture and the whole thing is tested on macOS as well, which is where it was written.
+
+Three things the fixtures exist to pin down. The v4 address is a little-endian u32 printed as hex, so reading it in written order gives 127.0.0.1 backwards. The v6 address is four little-endian words, not one big-endian number. And inode 0 is a socket with no owning process — TIME_WAIT, or kernel-internal — which would otherwise be joined to whichever process happened to hash there.
+
+Not verified on a live Linux kernel from here. The parsers are pinned by captured output and the ratio test asserts the claim where it can run; CI on ubuntu-latest is what actually exercises the file reading.
