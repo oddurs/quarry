@@ -1,0 +1,26 @@
+ quarry  acme-web acme/acme-web  3 listening · 2 worktrees                                           updated just now
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+╭ Services ────────────────────────────────────────────────────────────╮╭ Detail ────────────────────────────────────╮
+│ ▾ feat/billing                                                      2││ ● acme-web                                 │
+│▌ ●  3001 next-server                                 web  200   14ms ││   next-server · web · pid 13001            │
+│  ○  5432 PostgreSQL                                   db  ···        ││                                            │
+│ ▾ main                                                              1││ ADDRESS                                    │
+│  ●  3000 next-server                                 web  200  9.0ms ││   http://localhost:3001  ↗                 │
+│                                                                      ││                                            │
+│                                                                      ││ HEALTH                                     │
+│                                                                      ││   ● 200 OK · 14ms                          │
+│                                                                      ││   server  Next.js                          │
+│                                                                      ││                                            │
+│                                                                      ││ LISTENING                                  │
+│                                                                      ││   3001  127.0.0.1  loopback                │
+│                                                                      ││                                            │
+│                                                                      ││ REPOSITORY                                 │
+│                                                                      ││   acme-web                                 │
+│                                                                      ││   path                                     │
+│                                                                      ││ /src/.worktrees/acme-web/feat/billing      │
+│                                                                      ││   branch  feat/billing                     │
+│                                                                      ││   remote  acme/acme-web                    │
+│                                                                      ││                                            │
+│                                                                      ││ PROCESS                                    │
+╰──────────────────────────────────────────────────────────────────────╯╰────────────────────────────────────────────╯
+ ↑↓ move  ↵ open  y copy  / filter  a all  . here  K stop  R restart  r refresh  ? help
