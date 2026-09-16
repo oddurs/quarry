@@ -2,13 +2,14 @@
 id: 34
 title: Speak the protocols that will not introduce themselves
 type: feature
-status: backlog
+status: done
 milestone: v0.4
+assignee: Oddur Sigurdsson
 depends_on:
 - 27
 - 31
 created: 2026-09-08
-updated: 2026-09-08
+updated: 2026-09-15
 priority: p1
 area: probe
 effort: l
@@ -44,13 +45,13 @@ handshake is proof**: something else sitting on 5432 stops being reported as
 
 ## Acceptance criteria
 
-- [ ] handshakes named from the signature table, dispatched by name
-- [ ] every one read-only, unauthenticated, and bounded by the probe budget
-- [ ] a handshake that fails downgrades to `open`, not to `closed` — the socket
+- [x] handshakes named from the signature table, dispatched by name
+- [x] every one read-only, unauthenticated, and bounded by the probe budget
+- [x] a handshake that fails downgrades to `open`, not to `closed` — the socket
       is there, we just could not confirm what it is
-- [ ] a mismatch is reported: "5432, expected PostgreSQL, did not answer like one"
-- [ ] version shown in the detail pane where the protocol offers one
-- [ ] tested against a scripted server per protocol, not against a live database
+- [x] a mismatch is reported: "5432, expected PostgreSQL, did not answer like one"
+- [x] version shown in the detail pane where the protocol offers one
+- [x] tested against a scripted server per protocol, not against a live database
 
 ## 2026-09-08
 
@@ -59,3 +60,11 @@ Partly done. The mechanism is in place — `src/handshake.rs`, dispatched by a s
 ## 2026-09-08
 
 Partly done. The mechanism is in — `src/handshake.rs`, dispatched by a signature's `probe` field, with Redis (`PING`), memcached (`version`), PostgreSQL (`SSLRequest`, eight bytes and provably not a login) and MongoDB (`hello`) implemented, each read-only and unauthenticated, and a test asserting every `probe` named in the shipped table exists. MySQL needed no handshake: its greeting arrives unprompted and 0029 covers it. AMQP, Kafka, MQTT and DNS remain.
+
+## 2026-09-15
+
+AMQP, Kafka, MQTT and DNS are in, which completes the protocol list. Two corrections along the way: AMQP does not greet on connect — the client sends the protocol header first, and the module's comment said the opposite — and MQTT was named by six signatures while run() returned None for it, so those six were paying for a dispatch that did nothing.
+
+The part that mattered most was not the new protocols but confirms(): knowing what the right answer looks like, rather than that some bytes came back. Its own test caught the obvious hole immediately — 'postgres' accepted an SSH banner, because SSH-2.0-OpenSSH starts with S and the check was on the first byte alone. A PostgreSQL answers an SSLRequest with exactly one byte, and the length is as much of the proof as the letter.
+
+Version extraction is deliberately limited to bytes already in hand. Redis would give one for a second INFO round trip; that is not worth a second round trip.
