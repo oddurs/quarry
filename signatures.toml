@@ -1167,6 +1167,7 @@ kind = "vector"
 ports = [19530, 9091]
 process = ["milvus"]
 health = "/healthz"
+probe = "grpc"
 note = "19530 is the gRPC/SDK port and speaks no HTTP; the health check and the WebUI (/webui) live on 9091."
 
 [[signature]]
@@ -1271,10 +1272,19 @@ uri = "http://localhost:{port}/"
 note = "A Micronaut app, so /health rather than /actuator/health distinguishes it from Kafka UI on the same port."
 
 [[signature]]
+name = "gRPC service"
+kind = "api"
+ports = [50051]
+probe = "grpc"
+uri = "grpc://localhost:{port}"
+note = "50051 is the conventional gRPC port. The name comes from the port and the HTTP/2 preface, not from the service itself — gRPC carries no way to ask what it is."
+
+[[signature]]
 name = "Apache Kafka"
 kind = "queue"
 ports = [9092, 9093]
 process = ["kafka.kafka", "kafka-server-start"]
+probe = "kafka"
 uri = "localhost:{port}"
 note = "9092 is the broker listener, 9093 the KRaft controller listener; the controller port refuses ordinary client requests."
 
@@ -4349,6 +4359,7 @@ name = "BIND 9"
 kind = "system"
 ports = [53, 953]
 process = ["named"]
+probe = "dns"
 note = "953 is rndc control."
 
 [[signature]]
@@ -4379,6 +4390,7 @@ name = "CoreDNS"
 kind = "system"
 ports = [53, 9153]
 process = ["coredns"]
+probe = "dns"
 note = "9153 is the Prometheus metrics plugin; the health plugin listens separately on 8080, so no health path is given here."
 
 [[signature]]
@@ -4395,6 +4407,7 @@ name = "dnsmasq"
 kind = "system"
 ports = [53]
 process = ["dnsmasq"]
+probe = "dns"
 note = "Also serves DHCP on 67/udp when configured; commonly the DNS backend inside libvirt and Pi-hole."
 
 [[signature]]
