@@ -51,13 +51,9 @@ quarry sits open. A scan every six seconds that costs 111ms is a tool you
 
 ## v0.4 — First-class support for every kind of server
 
-`##########` 96% · 24 of 25 done
+`##########` 100% · 25 of 25 done
 
 quarry sees listening TCP sockets, guesses what they are from a port table and a
-
-### backlog
-
-- [ ] `0046` Tell a service that says it is unhealthy from one that is down <sup>feature · p2 · probe</sup>
 
 ### done
 
@@ -80,6 +76,7 @@ quarry sees listening TCP sockets, guesses what they are from a port table and a
 - [x] `0043` Decide how far to chase container runtimes beyond Docker <sup>spike · p2 · attribution</sup>
 - [x] `0044` Let people teach quarry about their own servers <sup>docs · p1 · docs</sup>
 - [x] `0045` Prove the taxonomy against a real stack <sup>chore · p1 · testing</sup>
+- [x] `0046` Tell a service that says it is unhealthy from one that is down <sup>feature · p2 · probe</sup>
 - [x] `0048` Several containers on one runtime process are shown as one service <sup>bug · p0 · discovery</sup>
 - [x] `0049` A containerised service is classified as a container, not as what it is <sup>bug · p1 · discovery</sup>
 - [x] `0050` A refresh costs two seconds on a machine with a hundred sockets <sup>bug · p0 · probe</sup>

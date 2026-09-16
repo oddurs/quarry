@@ -1,8 +1,9 @@
- quarry  4 listening                                 updated just now
+ quarry  5 listening                                 updated just now
 ──────────────────────────────────────────────────────────────────────
 ╭ Services ──────────────────────────────────────────────────────────╮
-│ ▾ no project                                                ✕2  4  │
+│ ▾ no project                                                ✕3  5  │
 │▌ ◆  3001 Grafana                                   web  403  4.0ms │
+│  ◑  3004 Temporal                             workflow  503  6.0ms │
 │  ▲  3002 Jaeger                                    web  503   41ms │
 │  ◌  3000 Next.js                                   web  starting   │
 │  ✕  3003 Redis                                   cache  no answer  │

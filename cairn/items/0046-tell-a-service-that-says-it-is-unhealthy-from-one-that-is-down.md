@@ -2,12 +2,12 @@
 id: 46
 title: Tell a service that says it is unhealthy from one that is down
 type: feature
-status: backlog
+status: done
 milestone: v0.4
 depends_on:
 - 35
 created: 2026-09-15
-updated: 2026-09-15
+updated: 2026-09-16
 priority: p2
 area: probe
 effort: m
@@ -45,12 +45,22 @@ Cheaper options, in order of preference:
 
 ## Acceptance criteria
 
-- [ ] a service answering on `/` and failing its own health path reads as
+- [x] a service answering on `/` and failing its own health path reads as
       degraded, with its own glyph
-- [ ] the extra request is bounded: it does not run for every service on
+- [x] the extra request is bounded: it does not run for every service on
       every scan
-- [ ] the probe budget in `tests/performance.rs` still passes
+- [x] the probe budget in `tests/performance.rs` still passes
 
 ## 2026-09-15
 
 A second source of 'degraded' arrived with 0038: a gRPC server answering NOT_SERVING on grpc.health.v1.Health/Check. The answer is read and shown in the detail pane already; what is missing is the same thing an unhealthy /healthz is missing, which is a health state that means 'answering, and saying it is unwell'. Both should land together.
+
+## 2026-09-16
+
+The item's own cheapest option — ask the health path and treat a 2xx on it as healthy — turned out to be what quarry already did, so it bought nothing. Degraded genuinely needs a second answer.
+
+The trick is when to ask for it. The item proposed asking the root whenever the health path answered 2xx; a hundred and fifty-one signatures name a health path, so that is a second request for most of the HTTP services on a machine, every scan. Asking only when the health path reports trouble costs nothing in the healthy case and is bounded to services that are actually failing — which is rare, and is exactly when a second request is worth making. There is a test that counts the requests: one for a well service, two for a sick one.
+
+Both broken is not degraded. If the root is failing too, the front door is broken and saying otherwise would make the state mean nothing.
+
+gRPC NOT_SERVING maps to the same state, which is what 0038 left behind.

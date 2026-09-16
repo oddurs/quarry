@@ -393,8 +393,19 @@ impl App {
                 }
             }
 
+            // A gRPC server answering NOT_SERVING is saying exactly what an
+            // unhealthy `/healthz` says, in a different protocol: it is
+            // answering, and it is not well.
+            let health = match server.serving {
+                Some(false) => Health::Degraded {
+                    status: 503,
+                    latency: latency_of(&health),
+                },
+                _ => health.clone(),
+            };
+
             let was_trouble = server.health.is_trouble();
-            server.health = reinterpreted(health.clone(), server);
+            server.health = reinterpreted(health, server);
             let is_trouble = server.health.is_trouble();
 
             if was_trouble != is_trouble
@@ -1280,6 +1291,14 @@ fn unix_seconds() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+/// Whatever the probe measured, for a state being rebuilt from another one.
+fn latency_of(health: &Health) -> Duration {
+    match health {
+        Health::Http { latency, .. } | Health::Open { latency } => *latency,
+        _ => Duration::ZERO,
+    }
 }
 
 /// A service seen for the first time this recently, and not yet serving, is

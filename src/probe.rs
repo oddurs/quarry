@@ -56,6 +56,11 @@ pub struct Target {
     /// A named handshake from the signature table, for protocols that will not
     /// speak until spoken to.
     pub handshake: Option<String>,
+    /// True when `path` is a health endpoint a signature named, rather than
+    /// the site root. Only then is there a second answer worth having: what
+    /// the front door says, as distinct from what the service says about
+    /// itself.
+    pub path_is_a_health_check: bool,
     /// Whether the scan already knows what this is.
     ///
     /// A service the signature table has named gains nothing from being given
@@ -86,6 +91,7 @@ impl Target {
             socket_path: None,
             path: "/".to_string(),
             handshake: None,
+            path_is_a_health_check: false,
             named: false,
             silent_before: false,
         }
@@ -102,6 +108,7 @@ impl Target {
             kind,
             path: "/".to_string(),
             handshake: None,
+            path_is_a_health_check: false,
             named: false,
             silent_before: false,
         }
@@ -244,6 +251,7 @@ impl Prober for NetProber {
             &target.path,
             self.max_body,
         ) {
+            let h = self.degraded_or(h, target, first, &host);
             // It answered over TLS, so there is a certificate to look at and
             // this is the one place that knows it. One extra handshake per
             // HTTPS service per scan — of which a developer machine has very
@@ -280,6 +288,7 @@ impl Prober for NetProber {
                 &target.path,
                 self.max_body,
             ) {
+                let h = self.degraded_or(h, target, second, &host);
                 let certificate = (second == "https")
                     .then(|| crate::tls::peek(sock, &host, self.connect_timeout))
                     .flatten();
@@ -306,6 +315,41 @@ impl Prober for NetProber {
 }
 
 impl NetProber {
+    /// Tell a service that says it is unwell from one whose front door is
+    /// broken.
+    ///
+    /// Those look identical from one request and call for different reactions.
+    /// Telling them apart needs a second answer, and the trick is when to ask
+    /// for it: **only when the health check already reported trouble**. A
+    /// service that is well costs nothing, which is almost all of them almost
+    /// all of the time — and a hundred and fifty-one signatures name a health
+    /// path, so asking on every success would have been a second request for
+    /// most of the HTTP services on a machine.
+    fn degraded_or(
+        &self,
+        health: Health,
+        target: &Target,
+        scheme: &'static str,
+        host: &str,
+    ) -> Health {
+        let Health::Http { status, .. } = health else {
+            return health;
+        };
+        if !target.path_is_a_health_check || status < 500 {
+            return health;
+        }
+        // Its own endpoint says it is unwell. Is the service there at all?
+        match http_probe(&self.agent, scheme, host, target.port, "/", self.max_body) {
+            Some(Health::Http {
+                status: root,
+                latency,
+                ..
+            }) if root < 400 => Health::Degraded { status, latency },
+            // The front door is no better, so this is simply broken.
+            _ => health,
+        }
+    }
+
     /// How long to let this particular service introduce itself.
     ///
     /// Nothing at all when the scan already named it and no handshake is

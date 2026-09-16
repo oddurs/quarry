@@ -164,6 +164,8 @@ impl Theme {
         match health {
             Health::Unknown => self.unknown,
             Health::Starting => self.starting,
+            // Its own report, and it is not good news.
+            Health::Degraded { .. } => self.server_error,
             Health::Bound => self.open,
             Health::Open { .. } => self.open,
             Health::Closed => self.closed,

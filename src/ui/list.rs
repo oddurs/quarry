@@ -470,6 +470,7 @@ fn status_abbrev(h: &Health) -> String {
         Health::Open { .. } => "open".into(),
         Health::Bound => "bound".into(),
         Health::Starting => "up…".into(),
+        Health::Degraded { status, .. } => status.to_string(),
         Health::Closed => "down".into(),
         Health::Unknown => "···".into(),
     }
@@ -494,6 +495,10 @@ fn status_cell(h: &Health, t: &Theme) -> (String, ratatui::style::Color) {
         Health::Open { latency } => (format!("open{:>6}", crate::model::fmt_ms(*latency)), t.open),
         Health::Bound => ("bound     ".to_string(), t.open),
         Health::Starting => ("starting  ".to_string(), t.starting),
+        Health::Degraded { status, latency } => (
+            format!("{status} {:>6}", crate::model::fmt_ms(*latency)),
+            t.server_error,
+        ),
         Health::Closed => ("no answer ".to_string(), t.server_error),
         Health::Unknown => ("···       ".to_string(), t.faint),
     }

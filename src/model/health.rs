@@ -20,6 +20,17 @@ pub enum Health {
     /// Bound, but nothing was tested. A UDP socket cannot be connected to, and
     /// saying "open" would claim a check that did not happen.
     Bound,
+    /// Answering, and saying it is unwell.
+    ///
+    /// A `200` on `/` and a `503` on `/healthz` is a different thing from
+    /// either a working service or a broken one: the front door is fine and
+    /// the service has diagnosed itself. Those call for different reactions
+    /// and used to look identical.
+    Degraded {
+        /// What its own health endpoint said.
+        status: u16,
+        latency: Duration,
+    },
     /// Just appeared, and not yet serving what it is expected to serve.
     ///
     /// A dev server binds its port the moment it starts and then spends thirty
@@ -40,6 +51,8 @@ impl Health {
             Health::Unknown => "○",
             Health::Bound => "◍",
             Health::Starting => "◌",
+            // Half-filled: working, and not well.
+            Health::Degraded { .. } => "◑",
             Health::Open { .. } => "●",
             Health::Closed => "✕",
             Health::Http { status, .. } => match status {
@@ -57,6 +70,9 @@ impl Health {
             Health::Unknown => "checking".into(),
             Health::Bound => "bound".into(),
             Health::Starting => "starting".into(),
+            Health::Degraded { status, latency } => {
+                format!("{status} unhealthy · {}", fmt_ms(*latency))
+            }
             Health::Open { latency } => format!("open · {}", fmt_ms(*latency)),
             Health::Closed => "not responding".into(),
             Health::Http {
@@ -79,14 +95,17 @@ impl Health {
             // A service asking who you are is working, so it sorts with the
             // working ones rather than with the failures.
             _ if self.is_protected() => 1,
-            Health::Http { .. } => 2,
-            Health::Open { .. } => 3,
-            Health::Bound => 4,
+            // Answering but unwell sorts above a service whose front door is
+            // broken: more of it is working, and less of it is guesswork.
+            Health::Degraded { .. } => 2,
+            Health::Http { .. } => 3,
+            Health::Open { .. } => 4,
+            Health::Bound => 5,
             // Above `Unknown`: a service we know is coming up is a better
             // answer than one we have not asked about.
-            Health::Starting => 5,
-            Health::Unknown => 6,
-            Health::Closed => 7,
+            Health::Starting => 6,
+            Health::Unknown => 7,
+            Health::Closed => 8,
         }
     }
 
@@ -108,8 +127,13 @@ impl Health {
         matches!(self, Health::Starting)
     }
 
+    /// Answering, and saying it is unwell.
+    pub fn is_degraded(&self) -> bool {
+        matches!(self, Health::Degraded { .. })
+    }
+
     pub fn is_trouble(&self) -> bool {
-        matches!(self, Health::Closed)
+        matches!(self, Health::Closed | Health::Degraded { .. })
             || matches!(self, Health::Http { status, .. } if *status >= 500)
     }
 }

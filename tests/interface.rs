@@ -1333,3 +1333,121 @@ mod naming {
         assert_eq!(s.folder_name().as_deref(), Some("sketch"));
     }
 }
+
+/// 0046 — a service answering on `/` while its own health endpoint says `503`
+/// is a different thing from either a working service or a broken one.
+mod degraded {
+    use super::*;
+    use quarry::model::Health;
+
+    fn unwell() -> Health {
+        Health::Degraded {
+            status: 503,
+            latency: Duration::from_millis(4),
+        }
+    }
+
+    /// The front door is fine and the service has diagnosed itself. That is
+    /// not the same as the front door being broken.
+    #[test]
+    fn it_reads_differently_from_a_plain_failure() {
+        let broken = testkit::status(503, 4);
+        assert_ne!(unwell().glyph(), broken.glyph());
+        assert_ne!(unwell().summary(), broken.summary());
+        assert!(
+            unwell().summary().contains("unhealthy"),
+            "{}",
+            unwell().summary()
+        );
+    }
+
+    /// More of it is working than of a service whose root is failing, so it
+    /// sorts above one — and it is still a problem.
+    #[test]
+    fn it_sorts_above_a_broken_front_door_and_still_counts() {
+        assert!(unwell().rank() < testkit::status(503, 4).rank());
+        assert!(unwell().is_trouble());
+        assert!(unwell().is_degraded());
+    }
+
+    /// Colour is not load-bearing: every state has to be told apart without it.
+    #[test]
+    fn it_has_a_glyph_of_its_own() {
+        let mut seen = std::collections::HashSet::new();
+        for h in [
+            unwell(),
+            Health::Starting,
+            Health::Closed,
+            Health::Bound,
+            Health::Unknown,
+            testkit::status(503, 4),
+            testkit::status(403, 4),
+            testkit::served(200, 4, None, None),
+        ] {
+            assert!(
+                seen.insert(h.glyph()),
+                "{h:?} shares a glyph with another state"
+            );
+        }
+    }
+
+    /// A gRPC server answering NOT_SERVING says exactly what an unhealthy
+    /// `/healthz` says, in a different protocol.
+    #[test]
+    fn a_grpc_server_that_says_it_is_not_serving_is_degraded() {
+        let mut app = App::new();
+        let mut s = server(50051, "server")
+            .service("gRPC service")
+            .kind(Kind::Api)
+            .build();
+        s.handshake = Some("grpc".into());
+        app.ingest(vec![s]);
+
+        // SETTINGS, then a DATA frame carrying `HealthCheckResponse{NOT_SERVING}`.
+        let mut reply = vec![0, 0, 0, 0x04, 0, 0, 0, 0, 0];
+        reply.extend_from_slice(&[0, 0, 7, 0x00, 0x01, 0, 0, 0, 1]);
+        reply.extend_from_slice(&[0u8, 0, 0, 0, 2, 0x08, 2]);
+
+        app.apply_health(
+            10_000 + 50051,
+            50051,
+            Health::Open {
+                latency: Duration::from_millis(2),
+            },
+            Some(reply),
+            Some(true),
+            None,
+        );
+        let found = &app.servers[0];
+        assert_eq!(found.serving, Some(false));
+        assert!(found.health.is_degraded(), "{:?}", found.health);
+    }
+
+    /// And one that says it is serving is not.
+    #[test]
+    fn a_healthy_grpc_server_is_not_degraded() {
+        let mut app = App::new();
+        let mut s = server(50051, "server")
+            .service("gRPC service")
+            .kind(Kind::Api)
+            .build();
+        s.handshake = Some("grpc".into());
+        app.ingest(vec![s]);
+
+        let mut reply = vec![0, 0, 0, 0x04, 0, 0, 0, 0, 0];
+        reply.extend_from_slice(&[0, 0, 7, 0x00, 0x01, 0, 0, 0, 1]);
+        reply.extend_from_slice(&[0u8, 0, 0, 0, 2, 0x08, 1]);
+
+        app.apply_health(
+            10_000 + 50051,
+            50051,
+            Health::Open {
+                latency: Duration::from_millis(2),
+            },
+            Some(reply),
+            Some(true),
+            None,
+        );
+        assert!(!app.servers[0].health.is_degraded());
+    }
+}

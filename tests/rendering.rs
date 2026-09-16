@@ -154,6 +154,14 @@ fn the_in_between_states_in_every_theme() {
                 .kind(Kind::Web)
                 .health(testkit::status(503, 41))
                 .build(),
+            testkit::server(3004, "node")
+                .service("Temporal")
+                .kind(Kind::Workflow)
+                .health(quarry::model::Health::Degraded {
+                    status: 503,
+                    latency: std::time::Duration::from_millis(6),
+                })
+                .build(),
             testkit::server(3003, "redis")
                 .service("Redis")
                 .kind(Kind::Cache)
@@ -165,11 +173,11 @@ fn the_in_between_states_in_every_theme() {
         app.theme = Theme::resolve(name).expect("a built-in theme resolves");
         assert_snapshot(
             &format!("states_{name}"),
-            &ui::render_to_string(&mut app, 70, 10, 0),
+            &ui::render_to_string(&mut app, 70, 11, 0),
         );
         assert_snapshot(
             &format!("states_colours_{name}"),
-            &ui::render_styles_to_string(&mut app, 70, 10, 0),
+            &ui::render_styles_to_string(&mut app, 70, 11, 0),
         );
     }
 }
