@@ -12,6 +12,7 @@ use quarry::app::{Action, App, ToastKind};
 use quarry::config::Config;
 use quarry::engine::Engine;
 use quarry::keys::Keymap;
+use quarry::lifecycle::{self, Op};
 use quarry::model::Rules;
 use quarry::probe::{NetProber, Pool, Target};
 use quarry::runtime::{self, Msg, Settings};
@@ -30,6 +31,10 @@ struct Startup {
     rules: Rules,
     signatures: quarry::signature::Registry,
     show_all: bool,
+    /// The repository quarry was started in, if any.
+    scope: Option<quarry::model::Scope>,
+    /// Whether `--here` asked for it to be applied.
+    here: bool,
 }
 
 fn main() -> Result<()> {
@@ -73,6 +78,7 @@ fn main() -> Result<()> {
     let known_flags = [
         "-a",
         "--all",
+        "--here",
         "-p",
         "--plain",
         "--doctor",
@@ -104,6 +110,9 @@ fn main() -> Result<()> {
     }
 
     let startup = resolve(&args);
+    // Before anything draws: `--here` outside a repository is a question with
+    // no answer, and every path below would otherwise quietly show the machine.
+    startup.scoped()?;
 
     if let Some(spec) = flag_value(&args, "--screenshot") {
         return screenshot(&spec, startup);
@@ -121,6 +130,7 @@ fn print_usage() {
          \x20 quarry themes [filter]\n  quarry signatures [filter]\n  quarry why <port>\n\n\
          OPTIONS:\n\
          \x20 -a, --all             include system services\n\
+         \x20     --here            only this repository, grouped by worktree\n\
          \x20 -p, --plain           print one line per service and exit\n\
          \x20     --theme <NAME>    use a theme for this run (auto, mono, gotham, …)\n\
          \x20     --config <PATH>   read this config file instead of the usual one\n\
@@ -174,6 +184,11 @@ fn resolve(args: &[String]) -> Startup {
     }
 
     let show_all = config.show_all || args.iter().any(|a| a == "-a" || a == "--all");
+    let here = args.iter().any(|a| a == "--here");
+    // Looked up once, not per frame: the working directory cannot change while
+    // quarry runs, and walking up to find `.git` is the kind of thing that must
+    // not happen inside a render.
+    let scope = quarry::model::Scope::here();
 
     Startup {
         config,
@@ -183,6 +198,31 @@ fn resolve(args: &[String]) -> Startup {
         rules,
         signatures,
         show_all,
+        scope,
+        here,
+    }
+}
+
+impl Startup {
+    /// The scope to apply, or an error if `--here` was asked for outside a
+    /// repository.
+    ///
+    /// Silently showing the whole machine instead would be the wrong answer to
+    /// a question that was asked precisely: the output would look like a
+    /// working `--here` in a project with an improbable number of servers.
+    fn scoped(&self) -> Result<Option<&quarry::model::Scope>> {
+        if !self.here {
+            return Ok(None);
+        }
+        match &self.scope {
+            Some(scope) => Ok(Some(scope)),
+            None => Err(anyhow::anyhow!(
+                "--here needs a git repository, and {} is not in one",
+                std::env::current_dir()
+                    .map(|d| d.display().to_string())
+                    .unwrap_or_else(|_| "the working directory".into())
+            )),
+        }
     }
 }
 
@@ -468,19 +508,45 @@ fn plain(startup: Startup) -> Result<()> {
         }
     }
 
-    servers.retain(|s| startup.show_all || (!s.kind.is_background_noise() && !s.is_socket_only()));
-    servers.sort_by_key(|s| (s.group_key(), s.primary_port()));
-
-    for s in &servers {
-        println!(
-            "{:<9}  {:<9}  {:<22}  {:<22}  {:<26}  {}",
-            ellipsis(&s.primary_label(), 9),
-            s.kind.label(),
-            ellipsis(&s.title(), 22),
-            ellipsis(&s.service_name(), 22),
-            ellipsis(&s.health.summary(), 26),
-            s.url()
-        );
+    match startup.scoped()? {
+        // Scoped, the column that matters is which checkout it came from —
+        // inside one repository the project name is the same on every row and
+        // tells you nothing.
+        Some(scope) => {
+            servers.retain(|s| {
+                s.in_scope(scope)
+                    && (startup.show_all || (!s.kind.is_background_noise() && !s.is_socket_only()))
+            });
+            servers.sort_by_key(|s| (s.worktree_key(), s.primary_port()));
+            for s in &servers {
+                println!(
+                    "{:<9}  {:<9}  {:<22}  {:<22}  {:<26}  {}",
+                    ellipsis(&s.primary_label(), 9),
+                    s.kind.label(),
+                    ellipsis(&s.worktree_key(), 22),
+                    ellipsis(&s.service_name(), 22),
+                    ellipsis(&s.health.summary(), 26),
+                    s.url()
+                );
+            }
+        }
+        None => {
+            servers.retain(|s| {
+                startup.show_all || (!s.kind.is_background_noise() && !s.is_socket_only())
+            });
+            servers.sort_by_key(|s| (s.group_key(), s.primary_port()));
+            for s in &servers {
+                println!(
+                    "{:<9}  {:<9}  {:<22}  {:<22}  {:<26}  {}",
+                    ellipsis(&s.primary_label(), 9),
+                    s.kind.label(),
+                    ellipsis(&s.title(), 22),
+                    ellipsis(&s.service_name(), 22),
+                    ellipsis(&s.health.summary(), 26),
+                    s.url()
+                );
+            }
+        }
     }
     Ok(())
 }
@@ -534,6 +600,8 @@ fn screenshot(spec: &str, startup: Startup) -> Result<()> {
 
     let mut app = App::new();
     app.show_all = startup.show_all;
+    app.scope = startup.scope.clone();
+    app.here = startup.here;
     app.theme = startup.theme;
     app.keymap = startup.keymap;
     app.rules = startup.rules.clone();
@@ -553,7 +621,7 @@ fn screenshot(spec: &str, startup: Startup) -> Result<()> {
         let outcomes = probe_all(&config, &report.servers);
         app.ingest(report.servers);
         for o in outcomes {
-            app.apply_health(o.pid, o.port, o.health, o.banner);
+            app.apply_health(o.pid, o.port, o.health, o.banner, o.confirmed);
         }
     }
     app.scanning = false;
@@ -604,6 +672,8 @@ fn run_tui(mut startup: Startup) -> Result<()> {
 
     let mut app = App::new();
     app.show_all = startup.show_all;
+    app.scope = startup.scope.clone();
+    app.here = startup.here;
     app.theme = startup.theme;
     app.keymap = startup.keymap;
     app.rules = startup.rules.clone();
@@ -641,9 +711,25 @@ fn event_loop(
                     port,
                     health,
                     banner,
-                } => app.apply_health(pid, port, health, banner),
+                    confirmed,
+                } => app.apply_health(pid, port, health, banner, confirmed),
                 Msg::ScanFailed { detail, transient } => app.scan_failed(detail, transient),
                 Msg::Warning(w) => app.warn(w),
+                Msg::Outcome { text, good } => {
+                    app.toast(
+                        text,
+                        if good {
+                            ToastKind::Good
+                        } else {
+                            ToastKind::Bad
+                        },
+                    );
+                    // The service list is wrong the moment something stops or
+                    // starts, and the user is looking straight at it.
+                    if good {
+                        handle.refresh();
+                    }
+                }
             }
             dirty = true;
         }
@@ -716,6 +802,10 @@ fn dispatch(
             app.theme = startup.theme;
             app.keymap = startup.keymap;
             app.show_all = startup.show_all;
+            // Deliberately not `app.here`: a reload re-reads the config, and
+            // narrowing to this repository was a decision made at the keyboard
+            // rather than something the config file has an opinion about.
+            app.scope = startup.scope.clone();
             app.rebuild();
             // Deliberately no `terminal.clear()`. It issues a cursor-position
             // query and waits for a reply, which stalls for seconds on a
@@ -736,24 +826,63 @@ fn dispatch(
             Ok(()) => app.toast(format!("copied {text}"), ToastKind::Good),
             Err(e) => app.toast(format!("clipboard unavailable: {e}"), ToastKind::Bad),
         },
-        Action::Signal { pid, force } => {
-            let sig = if force { "-KILL" } else { "-TERM" };
-            let ok = Command::new("kill")
-                .args([sig, &pid.to_string()])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false);
-            if ok {
-                app.toast(format!("sent {sig} to {pid}"), ToastKind::Good);
-                handle.refresh();
-            } else {
-                app.toast(format!("could not signal {pid}"), ToastKind::Bad);
-            }
+        Action::Lifecycle { targets, op } => {
+            // On a worker: a stop waits out a grace period and a restart waits
+            // for the process to exit and the port to settle. Seconds, either
+            // way, and the UI has to stay answerable throughout.
+            app.toast(format!("{}…", op.in_progress()), ToastKind::Info);
+            let tx = handle.outbox();
+            std::thread::Builder::new()
+                .name("quarry-lifecycle".into())
+                .spawn(move || {
+                    // One at a time. Restarting four services at once means
+                    // four processes racing for ports their predecessors have
+                    // not finished releasing.
+                    let mut done = Vec::new();
+                    let mut failed = Vec::new();
+                    for target in &targets {
+                        match lifecycle::perform(target, op) {
+                            Ok(text) => done.push(text),
+                            Err(text) => failed.push(text),
+                        }
+                    }
+                    let _ = tx.send(summarise(op, done, failed));
+                })
+                .map_err(|e| anyhow::anyhow!("could not start a worker: {e}"))?;
         }
     }
     Ok(false)
+}
+
+/// One toast for however many services were acted on.
+///
+/// A single service reports in its own words — "restarted as pid 4821" says
+/// more than "1 restarted". Several report as a count, because nine lines of
+/// detail in a toast is nothing anyone reads, and a failure is named first:
+/// that is the part you have to do something about.
+fn summarise(op: Op, done: Vec<String>, failed: Vec<String>) -> Msg {
+    match (done.len(), failed.len()) {
+        (1, 0) => Msg::Outcome {
+            text: done.into_iter().next().expect("one"),
+            good: true,
+        },
+        (0, 1) => Msg::Outcome {
+            text: failed.into_iter().next().expect("one"),
+            good: false,
+        },
+        (n, 0) => Msg::Outcome {
+            text: format!("{n} services {}", op.past()),
+            good: true,
+        },
+        (0, n) => Msg::Outcome {
+            text: format!("none of {n} could be {}: {}", op.past(), failed[0]),
+            good: false,
+        },
+        (n, f) => Msg::Outcome {
+            text: format!("{n} done, {f} failed — {}", failed[0]),
+            good: false,
+        },
+    }
 }
 
 fn copy_to_clipboard(text: &str) -> std::io::Result<()> {

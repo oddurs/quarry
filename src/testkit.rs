@@ -90,8 +90,13 @@ pub fn server(port: u16, command: &str) -> ServerBuilder {
             handshake: None,
             banner: None,
             evidence: Vec::new(),
+            unconfirmed: false,
+            version: None,
+            serving: None,
+            exposed: None,
             container: None,
             started_at: 1_700_000_000,
+            appeared: None,
             cpu: 0.5,
             mem: 64 * 1024 * 1024,
             health: Health::Unknown,
@@ -104,10 +109,40 @@ impl ServerBuilder {
         self.server.repo = Some(Repo {
             name: name.to_string(),
             root: PathBuf::from(format!("/src/{name}")),
+            main_root: PathBuf::from(format!("/src/{name}")),
             branch: Some(branch.to_string()),
             remote: Some(format!("acme/{name}")),
         });
         self.server.cwd = Some(PathBuf::from(format!("/src/{name}")));
+        self
+    }
+
+    /// A linked worktree of `name`: a different checkout, on a different
+    /// branch, belonging to the same repository.
+    pub fn worktree(mut self, name: &str, branch: &str) -> Self {
+        let root = PathBuf::from(format!("/src/.worktrees/{name}/{branch}"));
+        self.server.repo = Some(Repo {
+            name: name.to_string(),
+            root: root.clone(),
+            main_root: PathBuf::from(format!("/src/{name}")),
+            branch: Some(branch.to_string()),
+            remote: Some(format!("acme/{name}")),
+        });
+        self.server.cwd = Some(root);
+        self
+    }
+
+    /// Listening on a unix socket instead of a port. The path is deliberately
+    /// long here: an arbitrarily long one is the case the list column has to
+    /// survive, and `/tmp/cc-socks/…` is the shape a real one takes.
+    pub fn unix(mut self, path: &str) -> Self {
+        self.server.listeners = vec![crate::model::Listener::unix(PathBuf::from(path))];
+        self
+    }
+
+    /// Further listeners beyond the first, which the row reports as `+n`.
+    pub fn also_on(mut self, port: u16) -> Self {
+        self.server.listeners.push(listener(port));
         self
     }
 
@@ -267,6 +302,8 @@ pub fn demo() -> Vec<Server> {
             .health(health)
             .build();
         s.container = Some(crate::docker::Container {
+            id: format!("{:0>64}", format!("{name}1d")),
+            socket: "/var/run/docker.sock".into(),
             name: format!("harbour-{name}-1"),
             image: if name == "db" {
                 "postgres:16".into()
