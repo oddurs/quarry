@@ -72,6 +72,7 @@ fn read(work_tree: &Path, dot: &Path) -> Repo {
         .unwrap_or_else(|| git_dir.clone());
 
     Repo {
+        main_root: name_source.to_path_buf(),
         name: name_source
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
@@ -248,6 +249,27 @@ mod tests {
             "remote comes from the parent repository's config"
         );
         assert_eq!(found.root, checkout, "path still points at the checkout");
+        assert_eq!(
+            found.main_root, main,
+            "the repository a worktree belongs to, which is what says two \
+             checkouts are one project"
+        );
+    }
+
+    /// Two unrelated projects can be called the same thing. `--here` compares
+    /// repository roots rather than names for exactly this case.
+    #[test]
+    fn two_repositories_with_one_name_have_different_roots() {
+        let tmp = TempDir::new().expect("tempdir");
+        fs::create_dir_all(tmp.path().join("a")).expect("create a");
+        fs::create_dir_all(tmp.path().join("b")).expect("create b");
+        let one = repo(&tmp, "a/site", "ref: refs/heads/main\n", None);
+        let two = repo(&tmp, "b/site", "ref: refs/heads/main\n", None);
+
+        let one = find(&one).expect("repo a");
+        let two = find(&two).expect("repo b");
+        assert_eq!(one.name, two.name, "the fixture is the case being tested");
+        assert_ne!(one.main_root, two.main_root);
     }
 
     #[test]

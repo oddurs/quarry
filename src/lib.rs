@@ -18,6 +18,11 @@ pub mod engine;
 pub mod exec;
 pub mod handshake;
 pub mod keys;
+pub mod lifecycle;
+// Not gated to Linux: the parsers are pure, and a `/proc` layout captured in
+// a fixture directory is readable from anywhere. Only choosing this source is
+// platform-specific.
+pub mod linux;
 pub mod lsof;
 pub mod model;
 pub mod probe;

@@ -16,147 +16,174 @@ pub struct Check {
     pub fatal: bool,
 }
 
+impl Check {
+    /// Three outcomes, spelled once. As struct literals, sixteen checks came
+    /// to sixteen blocks that differed only in two booleans — and the booleans
+    /// are what a reader had to decode to know which outcome it was.
+    fn ok(name: &'static str, detail: impl Into<String>) -> Check {
+        Check {
+            name,
+            ok: true,
+            detail: detail.into(),
+            fatal: false,
+        }
+    }
+
+    /// Broken, but it only costs a feature.
+    fn warn(name: &'static str, detail: impl Into<String>) -> Check {
+        Check {
+            name,
+            ok: false,
+            detail: detail.into(),
+            fatal: false,
+        }
+    }
+
+    /// Broken, and quarry cannot do its job without it.
+    fn fatal(name: &'static str, detail: impl Into<String>) -> Check {
+        Check {
+            name,
+            ok: false,
+            detail: detail.into(),
+            fatal: true,
+        }
+    }
+}
+
+/// Every check, in the order they are printed.
+///
+/// A list of named checks rather than one long procedure: what quarry verifies
+/// about a machine should be readable as a list, and each entry should be
+/// findable by the name it prints.
 pub fn run(config: &Config, config_path: Option<&std::path::Path>, theme: &Theme) -> Vec<Check> {
     // Annotated because the first push is inside a platform-specific block:
     // without this the type is never inferred on some platforms.
-    let mut checks: Vec<Check> = Vec::new();
+    let mut checks: Vec<Check> = vec![socket_source()];
 
-    // Where listening sockets actually come from on this machine, and what
-    // that costs. Reported on every platform, naming whichever source is live.
+    // Both platforms have a native source now, and `lsof` is the fallback for
+    // each. Saying which one is live is the whole point of the check.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    checks.push(lsof_fallback(checks[0].ok));
+
+    let (rules, rule_problems) = crate::model::Rules::from_config(&config.ports, &config.names);
+    checks.extend(a_real_scan(&rules));
+    checks.push(configuration(config, config_path, &rule_problems));
+    checks.push(theme_in_use(theme, &rules));
+    checks.push(container_runtime());
+    checks.push(tool_check("clipboard", clipboard_tool()));
+    checks.push(tool_check("browser", browser_tool()));
+    checks.push(terminal_size());
+    checks.push(logging());
+    checks
+}
+
+/// Where listening sockets actually come from on this machine, and what that
+/// costs. Reported on every platform, naming whichever source is live.
+fn socket_source() -> Check {
     let started = Instant::now();
     let mut source = crate::engine::Engine::socket_source();
     let name = source.describe();
     match source.listening() {
-        Ok(sockets) => checks.push(Check {
-            name: "sockets",
-            ok: true,
-            detail: format!(
+        Ok(sockets) => Check::ok(
+            "sockets",
+            format!(
                 "{} listening in {}ms via {name}",
                 sockets.len(),
                 started.elapsed().as_millis()
             ),
-            fatal: false,
-        }),
-        Err(e) => checks.push(Check {
-            name: "sockets",
-            ok: false,
-            detail: format!("{name}: {e}"),
-            fatal: true,
-        }),
-    }
-
-    // The fallback, where there is a native path to fall back from.
-    #[cfg(target_os = "macos")]
-    {
-        // Needed to call `listening` on the concrete `Lsof`; a trait object
-        // does not require it, which is why this is not at the top of the file.
-        use crate::source::SocketSource;
-
-        let started = Instant::now();
-        let mut lsof = crate::lsof::Lsof;
-        let native_ok = checks.iter().any(|c| c.name == "sockets" && c.ok);
-        match lsof.listening() {
-            Ok(sockets) => checks.push(Check {
-                name: "lsof",
-                ok: true,
-                detail: format!(
-                    "{} listening in {}ms (fallback, not in use)",
-                    sockets.len(),
-                    started.elapsed().as_millis()
-                ),
-                fatal: false,
-            }),
-            Err(e) => checks.push(Check {
-                name: "lsof",
-                ok: native_ok,
-                detail: if native_ok {
-                    format!("unavailable ({e}), but not needed")
-                } else {
-                    e.to_string()
-                },
-                fatal: !native_ok,
-            }),
-        }
-    }
-
-    // Everything else degrades rather than fails.
-    let (rules, rule_problems) = crate::model::Rules::from_config(&config.ports, &config.names);
-    let mut engine = Engine::live().with_rules(rules.clone());
-    match engine.scan() {
-        Ok(report) => {
-            let attributed = report.servers.iter().filter(|s| s.repo.is_some()).count();
-            let with_cwd = report.servers.iter().filter(|s| s.cwd.is_some()).count();
-            checks.push(Check {
-                name: "processes",
-                ok: with_cwd > 0 || report.servers.is_empty(),
-                detail: format!(
-                    "{}/{} have a readable working directory",
-                    with_cwd,
-                    report.servers.len()
-                ),
-                fatal: false,
-            });
-            checks.push(Check {
-                name: "projects",
-                ok: true,
-                detail: format!(
-                    "{}/{} attributed to a project",
-                    attributed,
-                    report.servers.len()
-                ),
-                fatal: false,
-            });
-        }
-        Err(e) => checks.push(Check {
-            name: "scan",
-            ok: false,
-            detail: e.to_string(),
-            fatal: true,
-        }),
-    }
-
-    checks.push(Check {
-        name: "config",
-        ok: rule_problems.is_empty(),
-        detail: match (config_path, rule_problems.len()) {
-            (_, n) if n > 0 => format!(
-                "{n} rule(s) could not be understood: {}",
-                rule_problems.join("; ")
-            ),
-            (Some(p), _) => {
-                let set = config.overridden();
-                if set.is_empty() {
-                    format!("{} (nothing overridden)", p.display())
-                } else {
-                    format!("{} — {}", p.display(), set.join(", "))
-                }
-            }
-            (None, _) => "no config file; using defaults".to_string(),
-        },
-        fatal: false,
-    });
-
-    checks.push(Check {
-        name: "theme",
-        ok: true,
-        detail: format!(
-            "{} ({}){}",
-            theme.name,
-            theme.source.label(),
-            if rules.is_empty() {
-                String::new()
-            } else {
-                format!(", {} custom rule(s)", rules.len())
-            }
         ),
-        fatal: false,
-    });
+        Err(e) => Check::fatal("sockets", format!("{name}: {e}")),
+    }
+}
 
+/// The fallback, where there is a native path to fall back from.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn lsof_fallback(native_ok: bool) -> Check {
+    // Needed to call `listening` on the concrete `Lsof`; a trait object does
+    // not require it, which is why this is not at the top of the file.
+    use crate::source::SocketSource;
+
+    let started = Instant::now();
+    let mut lsof = crate::lsof::Lsof;
+    match lsof.listening() {
+        Ok(sockets) => Check::ok(
+            "lsof",
+            format!(
+                "{} listening in {}ms (fallback, not in use)",
+                sockets.len(),
+                started.elapsed().as_millis()
+            ),
+        ),
+        Err(e) if native_ok => Check::warn("lsof", format!("unavailable ({e}), but not needed")),
+        Err(e) => Check::fatal("lsof", e.to_string()),
+    }
+}
+
+/// A scan of this machine, for what it says about the two things a scan can
+/// only partly know: working directories, and which project a service is in.
+fn a_real_scan(rules: &crate::model::Rules) -> Vec<Check> {
+    let mut engine = Engine::live().with_rules(rules.clone());
+    let report = match engine.scan() {
+        Ok(report) => report,
+        Err(e) => return vec![Check::fatal("scan", e.to_string())],
+    };
+    let total = report.servers.len();
+    let with_cwd = report.servers.iter().filter(|s| s.cwd.is_some()).count();
+    let attributed = report.servers.iter().filter(|s| s.repo.is_some()).count();
+    vec![
+        Check::warn(
+            "processes",
+            format!("{with_cwd}/{total} have a readable working directory"),
+        ),
+        Check::ok(
+            "projects",
+            format!("{attributed}/{total} attributed to a project"),
+        ),
+    ]
+}
+
+fn configuration(config: &Config, path: Option<&std::path::Path>, problems: &[String]) -> Check {
+    if !problems.is_empty() {
+        return Check::warn(
+            "config",
+            format!(
+                "{} rule(s) could not be understood: {}",
+                problems.len(),
+                problems.join("; ")
+            ),
+        );
+    }
+    let Some(path) = path else {
+        return Check::warn("config", "no config file; using defaults");
+    };
+    let overridden = config.overridden();
+    Check::warn(
+        "config",
+        if overridden.is_empty() {
+            format!("{} (nothing overridden)", path.display())
+        } else {
+            format!("{} — {}", path.display(), overridden.join(", "))
+        },
+    )
+}
+
+fn theme_in_use(theme: &Theme, rules: &crate::model::Rules) -> Check {
+    let custom = if rules.is_empty() {
+        String::new()
+    } else {
+        format!(", {} custom rule(s)", rules.len())
+    };
+    Check::ok(
+        "theme",
+        format!("{} ({}){custom}", theme.name, theme.source.label()),
+    )
+}
+
+fn container_runtime() -> Check {
     let containers = crate::docker::Containers::query();
-    checks.push(Check {
-        name: "containers",
-        ok: true,
-        detail: if containers.is_empty() {
+    Check::ok(
+        "containers",
+        if containers.is_empty() {
             "no container runtime answering; published ports stay unattributed".to_string()
         } else {
             format!(
@@ -164,59 +191,32 @@ pub fn run(config: &Config, config_path: Option<&std::path::Path>, theme: &Theme
                 containers.len()
             )
         },
-        fatal: false,
-    });
+    )
+}
 
-    checks.push(tool_check("clipboard", clipboard_tool()));
-    checks.push(tool_check("browser", browser_tool()));
+fn terminal_size() -> Check {
+    let detail = match crossterm::terminal::size() {
+        Ok((w, h)) if w < 60 || h < 12 => format!("{w}×{h} (cramped; 80×24 or more is better)"),
+        Ok((w, h)) => format!("{w}×{h}"),
+        Err(e) => format!("size unknown: {e}"),
+    };
+    Check::ok("terminal", detail)
+}
 
-    checks.push(Check {
-        name: "terminal",
-        ok: true,
-        detail: match crossterm::terminal::size() {
-            Ok((w, h)) => {
-                let cramped = w < 60 || h < 12;
-                format!(
-                    "{w}×{h}{}",
-                    if cramped {
-                        " (cramped; 80×24 or more is better)"
-                    } else {
-                        ""
-                    }
-                )
-            }
-            Err(e) => format!("size unknown: {e}"),
-        },
-        fatal: false,
-    });
-
-    checks.push(Check {
-        name: "log",
-        ok: true,
-        detail: match std::env::var("QUARRY_LOG") {
+fn logging() -> Check {
+    Check::ok(
+        "log",
+        match std::env::var("QUARRY_LOG") {
             Ok(p) if !p.is_empty() => format!("writing to {p}"),
             _ => "off (set QUARRY_LOG=/path/to/file)".to_string(),
         },
-        fatal: false,
-    });
-
-    checks
+    )
 }
 
 fn tool_check(name: &'static str, found: Option<&'static str>) -> Check {
     match found {
-        Some(tool) => Check {
-            name,
-            ok: true,
-            detail: format!("using {tool}"),
-            fatal: false,
-        },
-        None => Check {
-            name,
-            ok: false,
-            detail: "no supported helper found".to_string(),
-            fatal: false,
-        },
+        Some(tool) => Check::ok(name, format!("using {tool}")),
+        None => Check::warn(name, "no supported helper found"),
     }
 }
 

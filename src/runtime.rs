@@ -32,6 +32,8 @@ pub enum Msg {
         /// What the service said on connect, if anything — evidence for a
         /// second pass at identification.
         banner: Option<Vec<u8>>,
+        /// Whether a named handshake got the answer that protocol gives.
+        confirmed: Option<bool>,
     },
     /// The scan itself failed. Carries whether a retry is worth anything.
     ScanFailed {
@@ -39,6 +41,12 @@ pub enum Msg {
         transient: bool,
     },
     Warning(String),
+    /// The result of something the user asked for — a stop, a restart — which
+    /// happened on a worker rather than inline, because it takes seconds.
+    Outcome {
+        text: String,
+        good: bool,
+    },
 }
 
 enum Command {
@@ -84,6 +92,9 @@ impl Settings {
 /// The UI's handle on the background thread.
 pub struct Handle {
     commands: Sender<Command>,
+    /// Handed to workers so they can report back on the same channel the UI
+    /// already drains, rather than the UI growing a second one to poll.
+    outbox: SyncSender<Msg>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -92,6 +103,11 @@ impl Handle {
     /// the caller finds out from [`Handle::is_alive`], not from here.
     pub fn refresh(&self) {
         let _ = self.commands.send(Command::Refresh);
+    }
+
+    /// A sender for work done off the scanner thread.
+    pub fn outbox(&self) -> SyncSender<Msg> {
+        self.outbox.clone()
     }
 
     pub fn is_alive(&self) -> bool {
@@ -120,12 +136,16 @@ pub fn spawn(engine: Engine, prober: Arc<dyn Prober>, config: Settings) -> (Hand
 
     let thread = std::thread::Builder::new()
         .name("quarry-scanner".into())
-        .spawn(move || run(engine, prober, config, cmd_rx, msg_tx))
+        .spawn({
+            let msg_tx = msg_tx.clone();
+            move || run(engine, prober, config, cmd_rx, msg_tx)
+        })
         .expect("spawn scanner thread");
 
     (
         Handle {
             commands: cmd_tx,
+            outbox: msg_tx,
             thread: Some(thread),
         },
         msg_rx,
@@ -229,6 +249,7 @@ fn run(
                         port: o.port,
                         health: o.health,
                         banner: o.banner,
+                        confirmed: o.confirmed,
                     },
                 ) {
                     return;

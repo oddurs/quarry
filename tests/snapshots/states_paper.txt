@@ -1,0 +1,10 @@
+ quarry  4 listening                                 updated just now
+──────────────────────────────────────────────────────────────────────
+╭ Services ──────────────────────────────────────────────────────────╮
+│ ▾ no project                                                  ✕2  4│
+│▌ ◆  3001 Grafana                                   web  403  4.0ms │
+│  ▲  3002 Jaeger                                    web  503   41ms │
+│  ◌  3000 Next.js                                   web  starting   │
+│  ✕  3003 Redis                                   cache  no answer  │
+╰────────────────────────────────────────────────────────────────────╯
+ ↑↓ move  ↵ open  y copy  / filter  a all  . here  r refresh  ? help
