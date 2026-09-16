@@ -62,6 +62,8 @@ pub struct Server {
     pub serving: Option<bool>,
     /// Where the world can reach this, when something is exposing it.
     pub exposed: Option<crate::tunnel::Exposure>,
+    /// What it presented at the TLS handshake, where it speaks TLS.
+    pub certificate: Option<crate::certificate::Certificate>,
     /// The container behind this port, where the runtime published one.
     pub container: Option<crate::docker::Container>,
     pub started_at: u64,
@@ -110,6 +112,27 @@ impl Server {
     /// The same, for a column of fixed width.
     pub fn primary_column(&self) -> String {
         self.primary().map(|l| l.column()).unwrap_or_default()
+    }
+
+    /// A TLS certificate that has expired, is about to, or is for a name other
+    /// than the one being used. Each of these is otherwise diagnosed by reading
+    /// a browser error.
+    pub fn certificate_trouble(&self, now: u64) -> Option<String> {
+        let c = self.certificate.as_ref()?;
+        let now = now as i64;
+        if c.expired(now) {
+            return Some("certificate expired".to_string());
+        }
+        if c.expires_within(7 * 86_400, now) {
+            return Some("certificate expires within a week".to_string());
+        }
+        // quarry reaches every service as `localhost`, so that is the name a
+        // client checks the certificate against.
+        let host = "localhost";
+        if !c.names.is_empty() && !c.covers(host) {
+            return Some(format!("certificate is not for {host}"));
+        }
+        None
     }
 
     /// Whether handing this to a browser is a promise that can be kept.

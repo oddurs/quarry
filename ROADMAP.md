@@ -51,14 +51,13 @@ quarry sits open. A scan every six seconds that costs 111ms is a tool you
 
 ## v0.4 — First-class support for every kind of server
 
-`########··` 80% · 16 of 20 done
+`#########·` 85% · 17 of 20 done
 
 quarry sees listening TCP sockets, guesses what they are from a port table and a
 
 ### backlog
 
 - [ ] `0040` Group the servers one command started <sup>feature · p2 · attribution</sup>
-- [ ] `0042` Show what the TLS certificate says <sup>feature · p2 · probe</sup>
 - [ ] `0045` Prove the taxonomy against a real stack <sup>chore · p1 · testing</sup>
 - [ ] `0046` Tell a service that says it is unhealthy from one that is down <sup>feature · p2 · probe</sup>
 
@@ -78,6 +77,7 @@ quarry sees listening TCP sockets, guesses what they are from a port table and a
 - [x] `0038` Recognise gRPC and HTTP/2 services <sup>feature · p2 · probe</sup>
 - [x] `0039` Show a tunnel's public URL, not its local port <sup>feature · p2 · attribution</sup>
 - [x] `0041` Copy something you can actually paste <sup>feature · p2 · chrome</sup>
+- [x] `0042` Show what the TLS certificate says <sup>feature · p2 · probe</sup>
 - [x] `0043` Decide how far to chase container runtimes beyond Docker <sup>spike · p2 · attribution</sup>
 - [x] `0044` Let people teach quarry about their own servers <sup>docs · p1 · docs</sup>
 

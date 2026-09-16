@@ -621,7 +621,14 @@ fn screenshot(spec: &str, startup: Startup) -> Result<()> {
         let outcomes = probe_all(&config, &report.servers);
         app.ingest(report.servers);
         for o in outcomes {
-            app.apply_health(o.pid, o.port, o.health, o.banner, o.confirmed);
+            app.apply_health(
+                o.pid,
+                o.port,
+                o.health,
+                o.banner,
+                o.confirmed,
+                o.certificate,
+            );
         }
     }
     app.scanning = false;
@@ -712,7 +719,8 @@ fn event_loop(
                     health,
                     banner,
                     confirmed,
-                } => app.apply_health(pid, port, health, banner, confirmed),
+                    certificate,
+                } => app.apply_health(pid, port, health, banner, confirmed, certificate),
                 Msg::ScanFailed { detail, transient } => app.scan_failed(detail, transient),
                 Msg::Warning(w) => app.warn(w),
                 Msg::Outcome { text, good } => {

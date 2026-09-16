@@ -646,7 +646,7 @@ mod starting {
         // Two scans: the first is not news, so nothing is new in it.
         app.ingest(vec![server(9999, "other").build()]);
         app.ingest(build(&Health::Unknown));
-        app.apply_health(10_000 + 3000, 3000, health, None, None);
+        app.apply_health(10_000 + 3000, 3000, health, None, None, None);
         app
     }
 
@@ -707,7 +707,7 @@ mod starting {
                 s.appeared = at.checked_sub(Duration::from_secs(300));
             }
         }
-        app.apply_health(10_000 + 3000, 3000, Health::Closed, None, None);
+        app.apply_health(10_000 + 3000, 3000, Health::Closed, None, None, None);
         assert!(
             matches!(health_of(&app), Health::Closed),
             "{:?}",
@@ -726,7 +726,7 @@ mod starting {
                 .kind(Kind::Web)
                 .build(),
         ]);
-        app.apply_health(10_000 + 3000, 3000, Health::Closed, None, None);
+        app.apply_health(10_000 + 3000, 3000, Health::Closed, None, None, None);
         assert!(matches!(health_of(&app), Health::Closed));
     }
 
@@ -786,6 +786,7 @@ mod handshakes {
             },
             None,
             confirmed,
+            None,
         );
         app
     }
@@ -862,6 +863,7 @@ mod grpc {
             },
             reply,
             Some(true),
+            None,
         );
         app
     }

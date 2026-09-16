@@ -9,6 +9,7 @@
 #![warn(clippy::all)]
 
 pub mod app;
+pub mod certificate;
 pub mod config;
 pub mod darwin;
 pub mod diag;
@@ -34,5 +35,6 @@ pub mod source;
 pub mod term;
 pub mod testkit;
 pub mod theme;
+pub mod tls;
 pub mod tunnel;
 pub mod ui;

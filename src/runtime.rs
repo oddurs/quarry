@@ -34,6 +34,8 @@ pub enum Msg {
         banner: Option<Vec<u8>>,
         /// Whether a named handshake got the answer that protocol gives.
         confirmed: Option<bool>,
+        /// What the service presented, where it speaks TLS.
+        certificate: Option<crate::certificate::Certificate>,
     },
     /// The scan itself failed. Carries whether a retry is worth anything.
     ScanFailed {
@@ -250,6 +252,7 @@ fn run(
                         health: o.health,
                         banner: o.banner,
                         confirmed: o.confirmed,
+                        certificate: o.certificate,
                     },
                 ) {
                     return;

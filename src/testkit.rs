@@ -94,6 +94,7 @@ pub fn server(port: u16, command: &str) -> ServerBuilder {
             version: None,
             serving: None,
             exposed: None,
+            certificate: None,
             container: None,
             started_at: 1_700_000_000,
             appeared: None,

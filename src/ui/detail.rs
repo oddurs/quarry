@@ -43,6 +43,7 @@ pub(super) fn draw_detail(f: &mut Frame, app: &mut App, t: &Theme, area: Rect) {
     let url_row = lines.len() + 1;
     lines.extend(detail_address(s, t));
     lines.extend(detail_health(s, t));
+    lines.extend(detail_certificate(s, t, app.now));
     lines.extend(detail_listening(s, t));
     lines.extend(detail_folder(s, t));
     lines.extend(detail_container(s, t));
@@ -186,6 +187,44 @@ fn detail_health(s: &Server, t: &Theme) -> Vec<Line<'static>> {
     if let Health::Http { server, title, .. } = &s.health {
         lines.extend(title.as_deref().map(|page| kv("page", page, t)));
         lines.extend(server.as_deref().map(|name| kv("server", name, t)));
+    }
+    lines.push(Line::from(""));
+    lines
+}
+
+/// What the certificate says. quarry never enforces any of it — verification
+/// stays off, because a self-signed local certificate is exactly the kind this
+/// is worth reporting on.
+fn detail_certificate(s: &Server, t: &Theme, now: u64) -> Vec<Line<'static>> {
+    let Some(c) = &s.certificate else {
+        return Vec::new();
+    };
+    let mut lines = vec![section("Certificate", t)];
+    lines.extend(c.subject.as_deref().map(|v| kv("subject", v, t)));
+    lines.extend(c.issuer.as_deref().map(|v| kv("issuer", v, t)));
+    if !c.names.is_empty() {
+        lines.push(kv("names", &c.names.join(", "), t));
+    }
+    if let Some(end) = c.not_after {
+        let left = end - now as i64;
+        let when = if left <= 0 {
+            format!(
+                "expired {} ago",
+                ago(Duration::from_secs(left.unsigned_abs()))
+            )
+        } else {
+            format!("in {}", ago(Duration::from_secs(left as u64)))
+        };
+        lines.push(kv("expires", &when, t));
+    }
+    if let Some(trouble) = s.certificate_trouble(now) {
+        lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled(
+                truncate(&trouble, DETAIL_WIDTH as usize - 4),
+                Style::default().fg(t.client_error),
+            ),
+        ]));
     }
     lines.push(Line::from(""));
     lines

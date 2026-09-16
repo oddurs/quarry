@@ -318,6 +318,7 @@ impl Engine {
             version: None,
             serving: None,
             exposed,
+            certificate: None,
             evidence: verdict.map(|v| v.reasons.clone()).unwrap_or_default(),
             container,
             started_at: i.started_at,

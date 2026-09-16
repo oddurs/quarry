@@ -96,9 +96,14 @@ pub(super) fn draw_list(f: &mut Frame, app: &mut App, t: &Theme, area: Rect) {
             let row_width = inner_width.min(ROW_MAX);
             let line = match row {
                 Row::Group(g) => group_line(app, t, *g, row_width, selected),
-                Row::Server(s) => {
-                    server_line(&app.servers[*s], t, row_width, label_width, selected)
-                }
+                Row::Server(s) => server_line(
+                    &app.servers[*s],
+                    t,
+                    row_width,
+                    label_width,
+                    app.now,
+                    selected,
+                ),
             };
             // Never both: two highlights on one line is one too many, and the
             // cursor is the one that has to win.
@@ -281,6 +286,7 @@ fn server_line(
     t: &Theme,
     width: usize,
     label_width: usize,
+    now: u64,
     selected: bool,
 ) -> Line<'static> {
     let (dot, dot_color) = (s.health.glyph(), t.health(&s.health));
@@ -334,7 +340,9 @@ fn server_line(
 
     let reserved = status.chars().count() + if show_badge { badge_cost } else { 0 };
     let name_width = avail.saturating_sub(reserved);
-    let doubt = usize::from(s.unconfirmed) + usize::from(s.exposed.is_some());
+    let doubt = usize::from(s.unconfirmed)
+        + usize::from(s.exposed.is_some())
+        + usize::from(s.certificate_trouble(now).is_some());
     let name = truncate(
         &s.service_name(),
         name_width
@@ -359,6 +367,16 @@ fn server_line(
         // and the row should not present it as anything more.
         Span::styled(
             if s.unconfirmed { "?" } else { "" },
+            Style::default().fg(t.client_error).bold(),
+        ),
+        // A certificate that has expired, or is for another name, is a local
+        // failure otherwise diagnosed by reading a browser error.
+        Span::styled(
+            if s.certificate_trouble(now).is_some() {
+                "!"
+            } else {
+                ""
+            },
             Style::default().fg(t.client_error).bold(),
         ),
         // Reachable from outside this machine, right now. There is nothing

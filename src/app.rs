@@ -288,6 +288,7 @@ impl App {
         health: Health,
         banner: Option<Vec<u8>>,
         confirmed: Option<bool>,
+        certificate: Option<crate::certificate::Certificate>,
     ) {
         let Some(indices) = self.by_pid.get(&pid) else {
             return;
@@ -350,6 +351,11 @@ impl App {
             // was not the answer, the number on the socket is the only thing
             // still claiming it is what it says.
             server.unconfirmed = confirmed == Some(false);
+            // Kept across a scan that did not look: a service does not stop
+            // having a certificate because this probe took the other branch.
+            if certificate.is_some() {
+                server.certificate = certificate.clone();
+            }
             if let Some(bytes) = &banner
                 && let Some(name) = &server.handshake
             {
