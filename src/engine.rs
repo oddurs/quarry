@@ -417,12 +417,20 @@ impl Engine {
             .first()
             .and_then(|l| l.path.as_ref())
             .map(|p| p.display().to_string());
+        // For a published port the host process is the runtime, which
+        // classifies as `container` and is not wrong about itself — it is
+        // simply not the service. The daemon already told us the image, and
+        // `postgres:16-alpine` says far more than `com.docker.backend` does.
+        let (command_evidence, cmdline_evidence) = match &container {
+            Some(c) => (c.image_name(), c.image.as_str()),
+            None => (command.as_str(), i.cmdline.as_str()),
+        };
         let identified = identify(
             &self.rules,
             &self.signatures,
             &Evidence {
-                command: &command,
-                cmdline: &i.cmdline,
+                command: command_evidence,
+                cmdline: cmdline_evidence,
                 ports: &ports,
                 ..Default::default()
             },
@@ -432,6 +440,13 @@ impl Engine {
             .as_ref()
             .and_then(|v| self.signatures.get(v.index));
         let verdict = identified.verdict.as_ref();
+
+        // An image the table knows nothing about is still a containerised
+        // service, which says more than `other` does.
+        let kind = match (identified.kind, &container) {
+            (Kind::Other, Some(_)) => Kind::Container,
+            (kind, _) => kind,
+        };
 
         Server {
             pid,
@@ -443,7 +458,7 @@ impl Engine {
             cwd: i.cwd,
             listeners,
             repo,
-            kind: identified.kind,
+            kind,
             service: verdict
                 .filter(|v| v.names_the_service())
                 .map(|v| v.name.clone()),

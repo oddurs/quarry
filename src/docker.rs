@@ -53,6 +53,22 @@ impl Container {
         self.service.as_deref().unwrap_or(&self.name)
     }
 
+    /// The image's bare repository name: `mongo:7` is `mongo`, and
+    /// `quay.io/minio/minio:latest` is `minio`.
+    ///
+    /// The registry and the tag are stripped because both are matched against
+    /// the signature table, and both can carry a name that means something
+    /// there by accident — an image pulled from `redis.example.com/anything`
+    /// is not a Redis.
+    pub fn image_name(&self) -> &str {
+        let without_tag = match self.image.rsplit_once(':') {
+            // A registry with a port, not a tag: `host:5000/image`.
+            Some((head, tail)) if !tail.contains('/') => head,
+            _ => self.image.as_str(),
+        };
+        without_tag.rsplit('/').next().unwrap_or(without_tag)
+    }
+
     pub fn is_healthy(&self) -> bool {
         match self.health.as_deref() {
             Some(h) => h == "healthy",
@@ -569,5 +585,51 @@ mod tests {
                 assert!(!c.image.is_empty(), "a container with no image");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod image_tests {
+    use super::*;
+
+    fn named(image: &str) -> Container {
+        Container {
+            id: "x".into(),
+            socket: "/var/run/docker.sock".into(),
+            name: "c".into(),
+            image: image.to_string(),
+            state: "running".into(),
+            health: None,
+            project: None,
+            service: None,
+            working_dir: None,
+        }
+    }
+
+    /// The image is matched against the signature table, so a registry
+    /// hostname carrying a name that means something there would classify an
+    /// image by where it was pulled from.
+    #[test]
+    fn an_image_is_reduced_to_its_repository_name() {
+        assert_eq!(named("mongo:7").image_name(), "mongo");
+        assert_eq!(named("postgres:16-alpine").image_name(), "postgres");
+        assert_eq!(named("quay.io/minio/minio:latest").image_name(), "minio");
+        assert_eq!(named("nginx").image_name(), "nginx");
+        assert_eq!(named("ghcr.io/acme/web:1.2.3").image_name(), "web");
+    }
+
+    /// A registry with a port looks like a tag and is not one.
+    #[test]
+    fn a_registry_port_is_not_a_tag() {
+        assert_eq!(named("registry:5000/team/api").image_name(), "api");
+    }
+
+    /// The whole point: this must not be read as a Redis.
+    #[test]
+    fn a_registry_named_after_a_service_does_not_name_the_image() {
+        assert_eq!(
+            named("redis.example.com/acme/billing:2").image_name(),
+            "billing"
+        );
     }
 }

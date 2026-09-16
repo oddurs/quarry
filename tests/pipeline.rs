@@ -394,3 +394,80 @@ mod probe_results {
         assert!(stack().iter().all(|s| !s.answers(4242, 56379)));
     }
 }
+
+/// 0049 — for a published port the host process is the runtime, which
+/// classifies as `container` and is not wrong about itself. It is simply not
+/// the service.
+mod containers_are_classified_by_image {
+    use super::*;
+    use quarry::docker::parse;
+    use quarry::model::Kind;
+    use quarry::testkit::socket;
+
+    fn scan(image: &str, port: u16) -> quarry::model::Server {
+        let mut procs: HashMap<u32, ProcInfo> = HashMap::new();
+        procs.insert(
+            9000,
+            ProcInfo {
+                cmdline: "com.docker.backend".into(),
+                name: "com.docker.backend".into(),
+                ppid: Some(1),
+                ..Default::default()
+            },
+        );
+        let body = format!(
+            r#"[{{"Id":"aaa","Names":["/stack-thing-1"],"Image":"{image}","State":"running",
+                 "Status":"Up","Ports":[{{"PrivatePort":1,"PublicPort":{port}}}]}}]"#
+        );
+        Engine::new(
+            Box::new(StaticSockets::new(vec![socket(
+                9000,
+                "com.docker.backend",
+                port,
+            )])),
+            Box::new(StaticProcesses::new(procs)),
+            Box::new(StaticCwds {
+                cwds: HashMap::new(),
+            }),
+        )
+        .with_containers(parse(&body, std::path::Path::new("/var/run/docker.sock")))
+        .scan()
+        .expect("scan succeeds")
+        .servers
+        .pop()
+        .expect("one service")
+    }
+
+    /// A PostgreSQL in a container is a database.
+    #[test]
+    fn the_taxonomy_reaches_containerised_services() {
+        for (image, port, kind) in [
+            ("postgres:16-alpine", 55432u16, Kind::Database),
+            ("redis:7-alpine", 56379, Kind::Cache),
+            ("mongo:7", 57017, Kind::Database),
+            ("rabbitmq:3-alpine", 55672, Kind::Queue),
+            ("nginx:1-alpine", 58080, Kind::Proxy),
+            ("quay.io/minio/minio:latest", 59000, Kind::Storage),
+        ] {
+            let s = scan(image, port);
+            assert_eq!(s.kind, kind, "{image} came out as {:?}", s.kind);
+        }
+    }
+
+    /// `stack-thing-1` is what the user called it; the image is how quarry
+    /// worked out what it is. Those are different questions.
+    #[test]
+    fn the_displayed_name_is_still_the_containers() {
+        assert_eq!(
+            scan("postgres:16-alpine", 55432).service_name(),
+            "stack-thing-1"
+        );
+    }
+
+    /// An image the table knows nothing about is still a container.
+    #[test]
+    fn an_unknown_image_is_still_a_container() {
+        let s = scan("acme/bespoke-thing:1", 41234);
+        assert_eq!(s.kind, Kind::Container, "{:?}", s.kind);
+    }
+}

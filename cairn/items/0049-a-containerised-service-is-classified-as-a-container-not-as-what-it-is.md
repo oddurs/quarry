@@ -2,8 +2,9 @@
 id: 49
 title: A containerised service is classified as a container, not as what it is
 type: bug
-status: backlog
+status: done
 milestone: v0.4
+assignee: Oddur Sigurdsson
 depends_on:
 - 48
 created: 2026-09-15
@@ -44,7 +45,15 @@ the user called it. This is about the kind, and about the signature behind it.
 
 ## Acceptance criteria
 
-- [ ] a container's image is used as evidence when identifying it
-- [ ] the stack in 0045 classifies by kind rather than all as `container`
-- [ ] the displayed name is still the container's, not the image's
-- [ ] a container whose image matches nothing is still `container`
+- [x] a container's image is used as evidence when identifying it
+- [x] the stack in 0045 classifies by kind rather than all as `container`
+- [x] the displayed name is still the container's, not the image's
+- [x] a container whose image matches nothing is still `container`
+
+## 2026-09-15
+
+The image is reduced to its repository name before it is matched. That is not cosmetic: the image string is fed to the same table that matches process names by substring, so an image pulled from redis.example.com/acme/billing would have classified as a Redis by virtue of the registry it came from.
+
+MongoDB needed the signature widening: the image is mongo and the process inside it is mongod, and the table only knew the latter. That is the shape of the whole problem — the table was written from process names and images are not process names.
+
+Known gap: mongo is now a substring match with word boundaries, so a mongo-express image would read as MongoDB. There is no mongo-express signature to compete with it. Narrow enough to leave rather than special-case.

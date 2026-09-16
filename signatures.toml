@@ -916,7 +916,8 @@ note = "TDS: the client sends PRELOGIN first, so nothing arrives unprompted. The
 name = "MongoDB"
 kind = "db"
 ports = [27017, 27018, 27019]
-process = ["mongod"]
+# `mongo` is the image; `mongod` is the process inside it.
+process = ["mongod", "mongo"]
 uri = "mongodb://localhost:{port}"
 probe = "mongodb"
 
