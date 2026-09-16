@@ -49,6 +49,21 @@ jobs:
           cargo run --quiet -- --plain
           cargo run --quiet -- --screenshot 100x30
 
+  # The only test that puts quarry in front of software somebody else wrote.
+  # Linux, because a container runtime is already there.
+  stack:
+    name: real stack
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Scan a stack of real servers
+        run: cargo test --test stack -- --ignored --nocapture
+      - name: Leave nothing running
+        if: always()
+        run: docker compose -f tests/fixtures/stack/compose.yml down --remove-orphans -t 5
+
   fuzz:
     name: extended randomised run
     runs-on: ubuntu-latest
