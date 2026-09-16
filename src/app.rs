@@ -432,86 +432,23 @@ impl App {
         true
     }
 
+    /// Rebuild the rows from the services, the filter and the arrangement.
+    ///
+    /// Three steps, and the order matters: decide what each service is grouped
+    /// under, put the visible ones in order, then walk that order emitting a
+    /// heading whenever the group changes.
     pub fn rebuild(&mut self) {
-        // Group keys are derived from the repo, the directory and the kind, and
-        // each derivation allocates. Computing them once and sorting on the
-        // result turns O(n log n) allocations into O(n).
-        // Inside one repository every service shares a project, so grouping
-        // by project would produce a single heap. The branch is what tells two
-        // of them apart, and it is what a person calls a worktree.
-        let scoped = self.scoped().is_some();
-        let flat = self.group_by == GroupBy::Nothing;
-        let keys: Vec<String> = self
-            .servers
-            .iter()
-            .map(|s| match self.group_by {
-                GroupBy::Kind => s.kind.label().to_string(),
-                // One key for everything: the rows still sort as one run, and
-                // the heading is simply never emitted.
-                GroupBy::Nothing => String::new(),
-                GroupBy::Project if scoped => s.worktree_key(),
-                GroupBy::Project => s.group_key(),
-            })
-            .collect();
-        // Where the name came from only orders groups by project. Grouped by
-        // kind, or not at all, it would shuffle rows for a reason that is not
-        // on screen.
-        let ranks: Vec<u8> = self
-            .servers
-            .iter()
-            .map(|s| match self.group_by {
-                GroupBy::Project => s.group_source().rank(),
-                _ => 0,
-            })
-            .collect();
-
-        // Parsed once here rather than once per service per keystroke.
-        let query = Query::parse(&self.search);
-        let mut indices: Vec<usize> = (0..self.servers.len())
-            .filter(|i| self.visible(&self.servers[*i], &query))
-            .collect();
-
-        // A group holding something broken sorts first. The one row that needs
-        // attention was reliably the hardest to reach: unattributed services
-        // sort last by rank, and a stray broken container is exactly the kind
-        // of thing that has no project.
-        let mut troubled: std::collections::HashSet<&str> = Default::default();
-        for i in &indices {
-            if self.servers[*i].health.is_trouble() {
-                troubled.insert(keys[*i].as_str());
-            }
-        }
-        let calm = |i: usize| !troubled.contains(keys[i].as_str());
-        let sort_by = self.sort_by;
-        let within = |a: usize, b: usize| {
-            let (x, y) = (&self.servers[a], &self.servers[b]);
-            match sort_by {
-                SortBy::Health => x.health.rank().cmp(&y.health.rank()),
-                SortBy::Port => std::cmp::Ordering::Equal,
-                SortBy::Name => x.service_name().cmp(&y.service_name()),
-                // Reversed: the one you just started is the one you are
-                // looking for, and it is the last to have been started.
-                SortBy::Newest => y.started_at.cmp(&x.started_at),
-            }
-            // Port always breaks the tie, so the order is total and the list
-            // does not reshuffle between two equal rows on every scan.
-            .then_with(|| x.primary_port().cmp(&y.primary_port()))
-        };
-        indices.sort_by(|a, b| {
-            calm(*a)
-                .cmp(&calm(*b))
-                .then_with(|| ranks[*a].cmp(&ranks[*b]))
-                .then_with(|| keys[*a].cmp(&keys[*b]))
-                .then_with(|| within(*a, *b))
-        });
+        let keys = self.group_keys();
+        let order = self.ordering(&keys);
 
         self.groups.clear();
         self.rows.clear();
         self.group_of.clear();
         self.group_of.resize(self.servers.len(), usize::MAX);
 
+        let flat = self.group_by == GroupBy::Nothing;
         let mut current: Option<&str> = None;
-        for i in indices {
+        for i in order {
             let key = keys[i].as_str();
             // Flat means no headings at all, not one heading over everything.
             if flat {
@@ -519,29 +456,7 @@ impl App {
                 continue;
             }
             if current != Some(key) {
-                let repo = self.servers[i].repo.clone();
-                // A heading only speaks for a project when the grouping is by
-                // project. Grouped by kind it belongs to whichever service
-                // happened to sort first, which is nobody.
-                let by_project = self.group_by == GroupBy::Project;
-                self.groups.push(Group {
-                    key: keys[i].clone(),
-                    source: self.servers[i].group_source(),
-                    describes_a_project: by_project,
-                    // Scoped, the key is already the branch and the remote is
-                    // the same for every group. Printing either again would be
-                    // noise on every row.
-                    branch: repo
-                        .as_ref()
-                        .and_then(|r| r.branch.clone())
-                        .filter(|_| by_project && !scoped),
-                    remote: repo
-                        .as_ref()
-                        .and_then(|r| r.remote.clone())
-                        .filter(|_| by_project && !scoped),
-                    count: 0,
-                    trouble: 0,
-                });
+                self.groups.push(self.heading(i, &keys));
                 self.rows.push(Row::Group(self.groups.len() - 1));
                 current = Some(key);
             }
@@ -557,6 +472,107 @@ impl App {
             }
         }
         self.clamp();
+    }
+
+    /// What each service is grouped under, by index.
+    ///
+    /// Computed once and sorted on, rather than derived during the sort: every
+    /// key allocates, and deriving them inside the comparator turns O(n log n)
+    /// allocations into O(n).
+    fn group_keys(&self) -> Vec<String> {
+        // Inside one repository every service shares a project, so grouping by
+        // project would produce a single heap. The branch is what tells two of
+        // them apart, and it is what a person calls a worktree.
+        let scoped = self.scoped().is_some();
+        self.servers
+            .iter()
+            .map(|s| match self.group_by {
+                GroupBy::Kind => s.kind.label().to_string(),
+                // One key for everything: the rows still sort as one run, and
+                // the heading is simply never emitted.
+                GroupBy::Nothing => String::new(),
+                GroupBy::Project if scoped => s.worktree_key(),
+                GroupBy::Project => s.group_key(),
+            })
+            .collect()
+    }
+
+    /// The visible services, in the order they appear on screen.
+    fn ordering(&self, keys: &[String]) -> Vec<usize> {
+        // Parsed once here rather than once per service per keystroke.
+        let query = Query::parse(&self.search);
+        let mut order: Vec<usize> = (0..self.servers.len())
+            .filter(|i| self.visible(&self.servers[*i], &query))
+            .collect();
+
+        // A group holding something broken sorts first. That row was reliably
+        // the hardest to reach: unattributed services sort last by rank, and a
+        // stray broken container is exactly the kind of thing with no project.
+        let troubled: HashSet<&str> = order
+            .iter()
+            .filter(|i| self.servers[**i].health.is_trouble())
+            .map(|i| keys[*i].as_str())
+            .collect();
+        let calm = |i: usize| !troubled.contains(keys[i].as_str());
+
+        // Where the name came from only orders groups by project. Grouped by
+        // kind, or not at all, it would shuffle rows for a reason that is not
+        // on screen.
+        let rank = |i: usize| match self.group_by {
+            GroupBy::Project => self.servers[i].group_source().rank(),
+            _ => 0,
+        };
+
+        order.sort_by(|a, b| {
+            calm(*a)
+                .cmp(&calm(*b))
+                .then_with(|| rank(*a).cmp(&rank(*b)))
+                .then_with(|| keys[*a].cmp(&keys[*b]))
+                .then_with(|| self.compare(*a, *b))
+        });
+        order
+    }
+
+    /// Two services in the same group, under the chosen order.
+    fn compare(&self, a: usize, b: usize) -> std::cmp::Ordering {
+        let (x, y) = (&self.servers[a], &self.servers[b]);
+        match self.sort_by {
+            SortBy::Health => x.health.rank().cmp(&y.health.rank()),
+            SortBy::Port => std::cmp::Ordering::Equal,
+            SortBy::Name => x.service_name().cmp(&y.service_name()),
+            // Reversed: the one you just started is the one you are looking
+            // for, and it is the last to have been started.
+            SortBy::Newest => y.started_at.cmp(&x.started_at),
+        }
+        // Port always breaks the tie, so the order is total and the list does
+        // not reshuffle between two equal rows on every scan.
+        .then_with(|| x.primary_port().cmp(&y.primary_port()))
+    }
+
+    /// The heading a group gets, from the first service under it.
+    fn heading(&self, i: usize, keys: &[String]) -> Group {
+        // A heading only speaks for a project when the grouping is by project.
+        // Grouped by kind it belongs to whichever service happened to sort
+        // first, which is nobody.
+        let by_project = self.group_by == GroupBy::Project;
+        let scoped = self.scoped().is_some();
+        let repo = self.servers[i].repo.as_ref();
+        Group {
+            key: keys[i].clone(),
+            source: self.servers[i].group_source(),
+            describes_a_project: by_project,
+            // Scoped, the key is already the branch and the remote is the same
+            // for every group. Printing either again would be noise on every
+            // row.
+            branch: repo
+                .and_then(|r| r.branch.clone())
+                .filter(|_| by_project && !scoped),
+            remote: repo
+                .and_then(|r| r.remote.clone())
+                .filter(|_| by_project && !scoped),
+            count: 0,
+            trouble: 0,
+        }
     }
 
     /// Group headers are only landable when collapsed — otherwise the cursor
@@ -704,7 +720,7 @@ impl App {
         let Some(s) = self.selected_server() else {
             return Action::None;
         };
-        if s.kind.opens_in_a_browser() && !s.is_socket_only() {
+        if s.opens_in_a_browser() {
             return Action::Open(s.url());
         }
         let what = s.service_name();

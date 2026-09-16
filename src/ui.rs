@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
     Block, BorderType, Clear, List, ListItem, ListState, Padding, Paragraph, Wrap,
@@ -91,13 +91,15 @@ fn draw_titlebar(f: &mut Frame, app: &App, t: &Theme, area: Rect, tick: usize) {
         .count();
     let trouble: usize = app.groups.iter().map(|g| g.trouble).sum();
 
-    // Everything after the count is optional; a narrow terminal keeps the
-    // identity and the number, and drops the rest rather than colliding.
+    // Everything after the first count is optional; a narrow terminal keeps the
+    // identity and the number, and drops the rest rather than colliding with
+    // the clock on the right.
     let roomy = area.width >= 78;
     let mut left = vec![
         Span::styled(" quarry", Style::default().fg(t.accent).bold()),
-        Span::styled("  ", Style::default()),
+        Span::raw("  "),
     ];
+
     // Scoped, the repository is the headline: it is the answer to "which
     // project am I looking at", and without it the screen is indistinguishable
     // from a machine that happens to be quiet.
@@ -112,91 +114,88 @@ fn draw_titlebar(f: &mut Frame, app: &App, t: &Theme, area: Rect, tick: usize) {
                 Style::default().fg(t.faint),
             ));
         }
-        left.push(Span::styled("  ", Style::default()));
+        left.push(Span::raw("  "));
     }
-    left.push(Span::styled(
-        format!("{services}"),
-        Style::default().fg(t.text).bold(),
-    ));
-    left.push(Span::styled(" listening", Style::default().fg(t.muted)));
+
+    let mut tallies = vec![tally(services, "listening", t.text, t.muted)];
     if roomy {
-        left.push(Span::styled(" · ", Style::default().fg(t.faint)));
-        left.push(Span::styled(
-            format!("{projects}"),
-            Style::default().fg(t.text).bold(),
-        ));
         // Inside one repository the groups are its worktrees, so calling them
         // projects would be a different claim than the screen is making.
-        left.push(Span::styled(
-            match (app.scoped().is_some(), projects == 1) {
-                (true, true) => " worktree",
-                (true, false) => " worktrees",
-                (false, true) => " project",
-                (false, false) => " projects",
-            },
-            Style::default().fg(t.muted),
-        ));
-    }
-    if trouble > 0 && roomy {
-        left.push(Span::styled(" · ", Style::default().fg(t.faint)));
-        left.push(Span::styled(
-            format!("{trouble}"),
-            Style::default().fg(t.server_error).bold(),
-        ));
-        left.push(Span::styled(
-            " unhealthy",
-            Style::default().fg(t.server_error),
-        ));
-    }
-    if !app.search.is_empty() && roomy {
-        left.push(Span::styled(" · ", Style::default().fg(t.faint)));
-        // With what it is hiding. "3 listening" beside a filter is ambiguous
-        // between a quiet machine and a narrow filter, and those two call for
-        // opposite reactions.
-        let hidden = app.servers.len().saturating_sub(services);
-        left.push(Span::styled(
-            match hidden {
+        let unit = match (app.scoped().is_some(), projects == 1) {
+            (true, true) => "worktree",
+            (true, false) => "worktrees",
+            (false, true) => "project",
+            (false, false) => "projects",
+        };
+        tallies.push(tally(projects, unit, t.text, t.muted));
+        if trouble > 0 {
+            tallies.push(tally(trouble, "unhealthy", t.server_error, t.server_error));
+        }
+        if !app.search.is_empty() {
+            // With what it is hiding. "3 listening" beside a filter is
+            // ambiguous between a quiet machine and a narrow filter, and those
+            // two call for opposite reactions.
+            let hidden = app.servers.len().saturating_sub(services);
+            let text = match hidden {
                 0 => format!("“{}”", app.search),
                 n => format!("“{}” · {n} hidden", app.search),
-            },
-            Style::default().fg(t.client_error),
-        ));
+            };
+            tallies.push(vec![Span::styled(
+                text,
+                Style::default().fg(t.client_error),
+            )]);
+        }
+    }
+    for (i, tally) in tallies.into_iter().enumerate() {
+        if i > 0 {
+            left.push(Span::styled(" · ", Style::default().fg(t.faint)));
+        }
+        left.extend(tally);
     }
 
-    let right = if let Some(f) = &app.failure {
-        format!(
-            "⚠ scan failing ({}×){} ",
-            f.count,
-            if f.transient { ", retrying" } else { "" }
-        )
-    } else if !app.scanner_alive {
-        "⚠ scanner stopped ".to_string()
-    } else if app.scanning {
-        format!("{} scanning ", SPINNER[tick % SPINNER.len()])
-    } else {
-        match app.last_scan {
-            Some(t) => {
-                let e = t.elapsed();
-                if e.as_secs() == 0 {
-                    "updated just now ".to_string()
-                } else {
-                    format!("updated {} ago ", ago(e))
-                }
-            }
-            None => String::from("starting "),
-        }
-    };
-
     f.render_widget(Line::from(left), area);
-    let right_style = if app.is_stale() {
+    let style = if app.is_stale() {
         Style::default().fg(t.server_error).bold()
     } else {
         Style::default().fg(t.muted)
     };
     f.render_widget(
-        Paragraph::new(Line::from(Span::styled(right, right_style))).alignment(Alignment::Right),
+        Paragraph::new(Line::from(Span::styled(scan_status(app, tick), style)))
+            .alignment(Alignment::Right),
         area,
     );
+}
+
+/// `4 projects` — a number and what it counts, which is the shape of every
+/// entry along the top.
+fn tally(n: usize, label: &str, number: Color, word: Color) -> Vec<Span<'static>> {
+    vec![
+        Span::styled(n.to_string(), Style::default().fg(number).bold()),
+        Span::styled(format!(" {label}"), Style::default().fg(word)),
+    ]
+}
+
+/// What the scanner is doing, in the corner. Trailing space: it is drawn
+/// right-aligned and would otherwise sit against the edge.
+fn scan_status(app: &App, tick: usize) -> String {
+    if let Some(f) = &app.failure {
+        return format!(
+            "⚠ scan failing ({}×){} ",
+            f.count,
+            if f.transient { ", retrying" } else { "" }
+        );
+    }
+    if !app.scanner_alive {
+        return "⚠ scanner stopped ".to_string();
+    }
+    if app.scanning {
+        return format!("{} scanning ", SPINNER[tick % SPINNER.len()]);
+    }
+    match app.last_scan.map(|t| t.elapsed()) {
+        None => "starting ".to_string(),
+        Some(e) if e.as_secs() == 0 => "updated just now ".to_string(),
+        Some(e) => format!("updated {} ago ", ago(e)),
+    }
 }
 
 fn draw_rule(f: &mut Frame, t: &Theme, area: Rect) {
@@ -618,48 +617,85 @@ fn draw_detail(f: &mut Frame, app: &mut App, t: &Theme, area: Rect) {
         // A folded group is a selection too. Showing "select a service" beside
         // one leaves the pane dead exactly when the user has just collapsed
         // something to look at it as a whole.
-        if let Some(group) = app.selected_group() {
-            f.render_widget(
-                Paragraph::new(group_detail(app, group, t)).block(block),
-                area,
-            );
-            return;
-        }
-        f.render_widget(
-            Paragraph::new(Line::from(Span::styled(
+        let lines = match app.selected_group() {
+            Some(group) => group_detail(app, group, t),
+            None => vec![Line::from(Span::styled(
                 "Select a service",
                 Style::default().fg(t.faint),
-            )))
-            .alignment(Alignment::Center)
-            .block(block),
+            ))],
+        };
+        let empty = app.selected_group().is_none();
+        let para = Paragraph::new(lines).block(block);
+        f.render_widget(
+            if empty {
+                para.alignment(Alignment::Center)
+            } else {
+                para
+            },
             area,
         );
         return;
     };
 
-    let now = app.now;
+    // Assembled section by section, in the order they are read. Where the URL
+    // lands has to be known for the mouse, and it is simply how many lines came
+    // before it.
+    let mut lines = detail_heading(s, t);
+    let url_row = lines.len() + 1;
+    lines.extend(detail_address(s, t));
+    lines.extend(detail_health(s, t));
+    lines.extend(detail_listening(s, t));
+    lines.extend(detail_folder(s, t));
+    lines.extend(detail_container(s, t));
+    lines.extend(detail_repository(s, t));
+    lines.extend(detail_process(s, t, app.now));
+    lines.extend(detail_command(s, t));
 
-    let (hero_dot, hero_color) = (s.health.glyph(), t.health(&s.health));
-    let mut lines: Vec<Line> = Vec::new();
-    lines.push(Line::from(vec![
-        Span::styled(format!("{hero_dot} "), Style::default().fg(hero_color)),
-        Span::styled(s.title(), Style::default().fg(t.text).bold()),
-    ]));
-    lines.push(Line::from(vec![
-        Span::raw("  "),
-        Span::styled(s.service_name(), Style::default().fg(t.muted)),
-        Span::styled(" · ", Style::default().fg(t.faint)),
-        Span::styled(s.kind.label(), Style::default().fg(t.kind(s.kind))),
-        Span::styled(" · ", Style::default().fg(t.faint)),
-        Span::styled(format!("pid {}", s.pid), Style::default().fg(t.muted)),
-    ]));
-    lines.push(Line::from(""));
+    let inner = block.inner(area);
+    if s.opens_in_a_browser() && (url_row as u16) < inner.height {
+        // +2 for the leading indent on the url row; +3 on the width for the
+        // arrow that follows it.
+        let width = (s.url().chars().count() + 3) as u16;
+        app.url_hitbox = Some(Rect {
+            x: inner.x + 2,
+            y: inner.y + url_row as u16,
+            width: width.min(inner.width.saturating_sub(2)),
+            height: 1,
+        });
+    }
 
-    // Address — the row the mouse can hit.
-    lines.push(section("Address", t));
-    let url_row = lines.len();
-    let openable = s.kind.opens_in_a_browser() && !s.is_socket_only();
-    if openable {
+    f.render_widget(
+        Paragraph::new(lines)
+            .block(block)
+            .wrap(Wrap { trim: false }),
+        area,
+    );
+}
+
+/// The name, and what it is in one line.
+fn detail_heading(s: &Server, t: &Theme) -> Vec<Line<'static>> {
+    let (dot, colour) = (s.health.glyph(), t.health(&s.health));
+    vec![
+        Line::from(vec![
+            Span::styled(format!("{dot} "), Style::default().fg(colour)),
+            Span::styled(s.title(), Style::default().fg(t.text).bold()),
+        ]),
+        Line::from(vec![
+            Span::raw("  "),
+            Span::styled(s.service_name(), Style::default().fg(t.muted)),
+            Span::styled(" · ", Style::default().fg(t.faint)),
+            Span::styled(s.kind.label(), Style::default().fg(t.kind(s.kind))),
+            Span::styled(" · ", Style::default().fg(t.faint)),
+            Span::styled(format!("pid {}", s.pid), Style::default().fg(t.muted)),
+        ]),
+        Line::from(""),
+    ]
+}
+
+/// The row the mouse can hit.
+fn detail_address(s: &Server, t: &Theme) -> Vec<Line<'static>> {
+    let mut lines = vec![section("Address", t)];
+    if s.opens_in_a_browser() {
         lines.push(Line::from(vec![
             Span::raw("  "),
             Span::styled(
@@ -687,58 +723,80 @@ fn draw_detail(f: &mut Frame, app: &mut App, t: &Theme, area: Rect) {
         ]));
     }
     lines.push(Line::from(""));
+    lines
+}
 
-    lines.push(section("Health", t));
-    let (dot, color) = (s.health.glyph(), t.health(&s.health));
-    lines.push(Line::from(vec![
-        Span::raw("  "),
-        Span::styled(format!("{dot} "), Style::default().fg(color)),
-        Span::styled(s.health.summary(), Style::default().fg(color)),
-    ]));
+fn detail_health(s: &Server, t: &Theme) -> Vec<Line<'static>> {
+    let (dot, colour) = (s.health.glyph(), t.health(&s.health));
+    let mut lines = vec![
+        section("Health", t),
+        Line::from(vec![
+            Span::raw("  "),
+            Span::styled(format!("{dot} "), Style::default().fg(colour)),
+            Span::styled(s.health.summary(), Style::default().fg(colour)),
+        ]),
+    ];
     if let Health::Http { server, title, .. } = &s.health {
-        if let Some(page) = title {
-            lines.push(kv("page", page, t));
-        }
-        if let Some(sv) = server {
-            lines.push(kv("server", sv, t));
-        }
+        lines.extend(title.as_deref().map(|page| kv("page", page, t)));
+        lines.extend(server.as_deref().map(|name| kv("server", name, t)));
     }
     lines.push(Line::from(""));
+    lines
+}
 
-    lines.push(section("Listening", t));
-    for l in &s.listeners {
-        lines.push(Line::from(vec![
+fn detail_listening(s: &Server, t: &Theme) -> Vec<Line<'static>> {
+    let mut lines = vec![section("Listening", t)];
+    lines.extend(s.listeners.iter().map(|l| {
+        Line::from(vec![
             Span::raw("  "),
             Span::styled(format!("{:<6}", l.port), Style::default().fg(t.text)),
             Span::styled(
                 format!("{}  {}", l.addr, l.scope()),
                 Style::default().fg(if l.wildcard { t.client_error } else { t.muted }),
             ),
-        ]));
-    }
+        ])
+    }));
     lines.push(Line::from(""));
+    lines
+}
 
-    if let Some(folder) = s.folder_name().filter(|_| s.repo.is_none()) {
-        {
-            lines.push(section("Folder", t));
-            lines.push(Line::from(vec![
-                Span::raw("  "),
-                Span::styled(folder, Style::default().fg(t.open).bold()),
-            ]));
-            if let Some(cwd) = &s.cwd {
-                lines.push(kv("path", &tilde(&cwd.display().to_string()), t));
-            }
-            lines.push(Line::from(Span::styled(
-                "  not a git repository",
-                Style::default().fg(t.faint),
-            )));
-            lines.push(Line::from(""));
-        }
-    }
+/// Where it is running, when that is all we know — a directory that is not a
+/// repository is still a project to whoever started it.
+fn detail_folder(s: &Server, t: &Theme) -> Vec<Line<'static>> {
+    let Some(folder) = s.folder_name().filter(|_| s.repo.is_none()) else {
+        return Vec::new();
+    };
+    let mut lines = vec![
+        section("Folder", t),
+        Line::from(vec![
+            Span::raw("  "),
+            Span::styled(folder, Style::default().fg(t.open).bold()),
+        ]),
+    ];
+    lines.extend(
+        s.cwd
+            .as_ref()
+            .map(|cwd| kv("path", &tilde(&cwd.display().to_string()), t)),
+    );
+    lines.push(Line::from(Span::styled(
+        "  not a git repository",
+        Style::default().fg(t.faint),
+    )));
+    lines.push(Line::from(""));
+    lines
+}
 
-    if let Some(container) = &s.container {
-        lines.push(section("Container", t));
-        lines.push(Line::from(vec![
+fn detail_container(s: &Server, t: &Theme) -> Vec<Line<'static>> {
+    let Some(container) = &s.container else {
+        return Vec::new();
+    };
+    let state = match &container.health {
+        Some(h) => format!("{} ({h})", container.state),
+        None => container.state.clone(),
+    };
+    let mut lines = vec![
+        section("Container", t),
+        Line::from(vec![
             Span::raw("  "),
             Span::styled(
                 container.display_name().to_string(),
@@ -746,40 +804,40 @@ fn draw_detail(f: &mut Frame, app: &mut App, t: &Theme, area: Rect) {
                     .fg(t.kind(crate::model::Kind::Container))
                     .bold(),
             ),
-        ]));
-        lines.push(kv("image", &container.image, t));
-        lines.push(kv(
-            "state",
-            &match &container.health {
-                Some(h) => format!("{} ({h})", container.state),
-                None => container.state.clone(),
-            },
-            t,
-        ));
-        if let Some(project) = &container.project {
-            lines.push(kv("compose", project, t));
-        }
-        lines.push(Line::from(""));
-    }
+        ]),
+        kv("image", &container.image, t),
+        kv("state", &state, t),
+    ];
+    lines.extend(
+        container
+            .project
+            .as_deref()
+            .map(|project| kv("compose", project, t)),
+    );
+    lines.push(Line::from(""));
+    lines
+}
 
-    if let Some(repo) = &s.repo {
-        lines.push(section("Repository", t));
-        lines.push(Line::from(vec![
+fn detail_repository(s: &Server, t: &Theme) -> Vec<Line<'static>> {
+    let Some(repo) = &s.repo else {
+        return Vec::new();
+    };
+    let mut lines = vec![
+        section("Repository", t),
+        Line::from(vec![
             Span::raw("  "),
             Span::styled(repo.name.clone(), Style::default().fg(t.repo).bold()),
-        ]));
-        lines.push(kv("path", &tilde(&repo.root.display().to_string()), t));
-        if let Some(b) = &repo.branch {
-            lines.push(kv("branch", b, t));
-        }
-        if let Some(r) = &repo.remote {
-            lines.push(kv("remote", r, t));
-        }
-        lines.push(Line::from(""));
-    }
+        ]),
+        kv("path", &tilde(&repo.root.display().to_string()), t),
+    ];
+    lines.extend(repo.branch.as_deref().map(|b| kv("branch", b, t)));
+    lines.extend(repo.remote.as_deref().map(|r| kv("remote", r, t)));
+    lines.push(Line::from(""));
+    lines
+}
 
-    lines.push(section("Process", t));
-    lines.push(kv("user", &s.user, t));
+fn detail_process(s: &Server, t: &Theme, now: u64) -> Vec<Line<'static>> {
+    let mut lines = vec![section("Process", t), kv("user", &s.user, t)];
     if s.started_at > 0
         && let Some(up) = s.uptime(now)
     {
@@ -790,16 +848,23 @@ fn draw_detail(f: &mut Frame, app: &mut App, t: &Theme, area: Rect) {
         &format!("{:.1}% cpu · {} rss", s.cpu, bytes(s.mem)),
         t,
     ));
-    if let Some(ppid) = s.ppid {
-        lines.push(kv("parent", &ppid.to_string(), t));
-    }
-    if let Some(exe) = &s.exe {
-        lines.push(kv("binary", &tilde(&exe.display().to_string()), t));
-    }
-    if let Some(cwd) = &s.cwd {
-        lines.push(kv("cwd", &tilde(&cwd.display().to_string()), t));
-    }
+    lines.extend(s.ppid.map(|ppid| kv("parent", &ppid.to_string(), t)));
+    lines.extend(
+        s.exe
+            .as_ref()
+            .map(|exe| kv("binary", &tilde(&exe.display().to_string()), t)),
+    );
+    lines.extend(
+        s.cwd
+            .as_ref()
+            .map(|cwd| kv("cwd", &tilde(&cwd.display().to_string()), t)),
+    );
     lines.push(Line::from(""));
+    lines
+}
+
+fn detail_command(s: &Server, t: &Theme) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
     if !s.evidence.is_empty() {
         lines.push(kv("named by", &s.evidence.join(", "), t));
     }
@@ -808,25 +873,7 @@ fn draw_detail(f: &mut Frame, app: &mut App, t: &Theme, area: Rect) {
         format!("  {}", s.cmdline),
         Style::default().fg(t.faint),
     )));
-
-    let inner = block.inner(area);
-    // +1 for the top border, and the leading two-space indent on the url row.
-    if openable && (url_row as u16) < inner.height {
-        let width = (s.url().chars().count() + 3) as u16;
-        app.url_hitbox = Some(Rect {
-            x: inner.x + 2,
-            y: inner.y + url_row as u16,
-            width: width.min(inner.width.saturating_sub(2)),
-            height: 1,
-        });
-    }
-
-    f.render_widget(
-        Paragraph::new(lines)
-            .block(block)
-            .wrap(Wrap { trim: false }),
-        area,
-    );
+    lines
 }
 
 /// What a folded group has to say for itself.

@@ -703,6 +703,15 @@ impl Server {
         self.primary().map(|l| l.column()).unwrap_or_default()
     }
 
+    /// Whether handing this to a browser is a promise that can be kept.
+    ///
+    /// Two conditions, and they were being written out together wherever the
+    /// question came up: the kind has to be something a browser speaks, and
+    /// there has to be a port — no browser opens a unix socket.
+    pub fn opens_in_a_browser(&self) -> bool {
+        self.kind.opens_in_a_browser() && !self.is_socket_only()
+    }
+
     /// True when nothing here can be reached over a port.
     pub fn is_socket_only(&self) -> bool {
         self.listeners.iter().all(|l| l.is_unix())
