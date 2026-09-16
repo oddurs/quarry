@@ -24,8 +24,39 @@ uses that — a repo name is shown in magenta, a plain folder in teal.
 │  ●  4320 node serve      web  404  2ms ││   http://localhost:4470  ↗                   │
 │  ●  4330 node astro.mjs  web  500  3ms ││ ...                                          │
 ╰────────────────────────────────────────╯╰──────────────────────────────────────────────╯
- ↑↓ move  ↵ open  y copy  / filter  a all  K stop  r refresh  ? help
+ ↑↓ move  ↵ open  y copy  / filter  a all  . here  K stop  R restart  r refresh  ? help
 ```
+
+## One project at a time
+
+`quarry --here` answers a narrower question than "what is running on this
+machine": what is running for the project I am in. Press `.` to switch between
+the two without restarting.
+
+```
+ quarry  acme-web acme/acme-web  3 listening · 2 worktrees                    updated just now
+──────────────────────────────────────────────────────────────────────────────────────────────
+╭ Services ─────────────────────────────────────────────────╮╭ Detail ─────────────────────────
+│ ▾ feat/billing                                           2││ ● acme-web
+│▌ ●  3001 next-server                      web  200   14ms ││   next-server · web · pid 13001
+│  ○  5432 PostgreSQL                        db  ···        ││
+│ ▾ main                                                   1││ ADDRESS
+│  ●  3000 next-server                      web  200  9.0ms ││   http://localhost:3001  ↗
+```
+
+The groups are worktrees, not projects — inside one repository the project name
+is on every row and tells you nothing, while the branch is what distinguishes
+two copies of the same server on two ports. A linked worktree counts even
+though it lives somewhere else on disk, and a Compose stack counts even though
+it runs in a container: both are attributed to the repository, so both are part
+of the project.
+
+Two unrelated checkouts can be called `site`. quarry compares repository roots
+rather than names, so they do not become one project.
+
+`-p --here` prints the same thing one line per service, with the branch in
+place of the project. `--here` outside a repository is an error rather than a
+quiet fall back to the whole machine.
 
 ## What it knows
 
@@ -148,16 +179,95 @@ quarry --fix-terminal         # undo a terminal left in mouse-reporting mode
 | `enter` / `o` | open the URL in your browser |
 | click | select a row, or open the URL in the detail pane |
 | `y` | copy the URL to the clipboard |
-| `/` | filter by repo, port, process or kind |
+| `/` | filter — `:port`, `@kind`, `~project`, `!not`, or any words |
 | `a` | include system services |
+| `.` | narrow to the repository you are in |
+| `tab` | hide the detail pane — the list takes the width |
+| `b` | group by — project, kind, or nothing |
+| `s` | sort by — health, port, name, newest |
+| `n` / `N` | jump between services that are not answering |
 | `esc` | back out — clear the filter, close an overlay |
 | `r` | rescan now |
-| `K` / `X` | SIGTERM / SIGKILL the process, with a confirm |
+| `K` / `R` | stop or restart it — or a whole group, with a confirm |
+| `X` | force kill — SIGKILL, with a confirm |
 | `d` | diagnostics — what failed, and why |
 | `ctrl-r` | reload the config and theme |
 | `m` | toggle mouse capture — off restores native text selection |
 | `?` | help |
 | `q` | quit |
+
+### Reading the screen
+
+The list is what you read; the detail pane is what you look up. So the detail
+pane takes a fixed width rather than a share of the terminal — a share meant
+half a wide terminal went to a key-value sheet that rarely changes, and half a
+narrow one starved the list beside it. `tab` hides it, and a terminal too
+narrow for both drops it without being asked.
+
+A group holding something that is not answering sorts to the top, and `n` and
+`N` jump between the broken ones, opening a folded group to get there. Before
+this, unattributed services sorted last — so a stray broken container, which is
+exactly the kind of thing that has no project, was reliably the row furthest
+down.
+
+A service that starts while quarry is watching is highlighted for half a
+minute — its whole row on a different ground, plus a `+` in the blank column
+between the selection bar and the health dot, so nothing shifts. Half a minute
+is measured from the other end: you start a server, watch it boot, and switch
+to quarry, which is ten or fifteen seconds on a slow one. A theme that cannot
+know the terminal's ground colour keeps the marker and skips the tint, and a
+theme file can name its own with `fresh`. One that stops leaves no row to mark,
+so it is said once instead.
+
+`b` changes how the list is divided and `s` changes the order within each
+division. By project is what quarry is for, but once you are asking a different
+question the division gets in the way: "every database on this machine" wants
+them together, and a filtered list often wants no headings at all. The pane
+title says which arrangement you are in.
+
+`/` takes prefixes: `:3000` is a port, `@web` a kind, `~acme` a project, and
+anything else matches whatever it can. `!` turns a term inside out. Several
+terms narrow together — `~acme @web` is this project's web servers, `@db !~acme`
+is every database that is not this project's.
+
+### Stopping and restarting
+
+`K` stops a service, `R` restarts it, `X` kills it outright. On a group
+heading they act on everything in it, one at a time — a worktree is a unit
+people think in, and doing it a row at a time is four confirmations for one
+intention. Each one asks first, and the prompt says what it is actually about
+to do, because that differs by what owns the service:
+
+- **A container** is stopped and restarted through the daemon it was found on
+  — by API, on that socket, not through whichever daemon `docker` on `PATH`
+  points at. A published port is held by the runtime's forwarder rather than
+  by the container, so signalling the pid quarry can see would leave the
+  container running with a broken port, and on some runtimes that pid belongs
+  to the daemon itself.
+- **A process** gets SIGTERM. To restart one, quarry reads its arguments,
+  its working directory and its environment first — if it cannot read all
+  three it says so and stops, rather than shutting down something it cannot
+  start again. Once the process has exited it watches the port for a couple of
+  seconds: most dev servers are already supervised by `npm run dev` or
+  `nodemon`, and if something else brings the service back, quarry leaves it
+  alone instead of starting a second copy. Otherwise it runs the command
+  again, detached, with its output appended to
+  `~/.local/state/quarry/<command>.log`.
+
+### What a refresh costs
+
+The first one is the expensive one, deliberately. quarry gives every socket a
+quarter of a second to introduce itself, because a banner is the one thing that
+names a service nothing else can name. After that it remembers: a socket that
+declined the invitation is not asked again, and a service the signature table
+already names is never asked at all. On a machine with a hundred listening
+sockets that is the difference between half a second per refresh and five
+milliseconds.
+
+The container runtime is asked when the set of listening ports changes, or once
+a minute — not every scan. A Docker daemon on macOS lives behind a VM boundary
+and takes twenty to thirty milliseconds to answer, which was more than
+everything else in a scan put together.
 
 ## How it works
 
@@ -166,11 +276,18 @@ quarry --fix-terminal         # undo a terminal left in mouse-reporting mode
   of dozen ports, and a great deal of local software — the Docker daemon,
   PostgreSQL, PHP-FPM, anything using socket activation — is reachable only
   through one. They live behind `--all` with the rest of the background.
-- **Sockets** come from the kernel directly, through `libproc` — the same
-  interface `lsof` uses, without spawning it or parsing its output back. That is
-  about forty times faster (a scan is 5 ms rather than 110 ms) and removes the
-  one binary quarry depended on. `lsof` stays as the fallback; `quarry --doctor`
-  says which path is live.
+- **Sockets** come from the kernel directly. On macOS that is `libproc`, the
+  same interface `lsof` uses, without spawning it or parsing its output back; on
+  Linux it is `/proc/net/tcp` and its siblings, joined to `/proc/<pid>/fd` by
+  socket inode. Either way it is about forty times faster than shelling out (a
+  scan is 5 ms rather than 110 ms) and removes the one binary quarry depended
+  on — which is not installed on a good many container images. `lsof` stays as
+  the fallback; `quarry --doctor` says which path is live.
+- **A container's listeners are in its own network namespace**, and a namespace
+  quarry is not in is one it cannot read. They do not appear in the host's
+  `/proc/net/tcp` at all. This is why quarry asks the container runtime
+  separately, and why a published port is attributed through the daemon rather
+  than found by looking.
 - **Process detail** comes from `sysinfo`; a second batched `lsof` fills in any
   working directory it could not read.
 - **Projects** come from the working directory: the repository it sits in, or
