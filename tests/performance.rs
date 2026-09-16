@@ -178,7 +178,7 @@ fn applying_probe_results_is_cheap() {
     let each = time("one result, 2000 services", 2000, || {
         let (pid, port) = pids[i % pids.len()];
         i += 1;
-        app.apply_health(pid, port, Health::Closed, None);
+        app.apply_health(pid, port, Health::Closed, None, None, None);
     });
     // Two thousand of these arrive within a couple of seconds of every scan.
     // This used to rebuild every group on every result, which was 188µs each —
@@ -201,7 +201,14 @@ fn re_identifying_from_new_evidence_is_bounded() {
     let each = time("one result carrying a banner", 2000, || {
         let (pid, port) = keys[i % keys.len()];
         i += 1;
-        app.apply_health(pid, port, Health::Closed, Some(b"SSH-2.0-OpenSSH".to_vec()));
+        app.apply_health(
+            pid,
+            port,
+            Health::Closed,
+            Some(b"SSH-2.0-OpenSSH".to_vec()),
+            None,
+            None,
+        );
     });
     // The cost is linear in the size of the signature table: 564 entries score
     // in about 60µs, and this budget leaves room for the table to roughly
@@ -302,4 +309,131 @@ fn the_native_socket_source_beats_lsof_by_an_order_of_magnitude() {
         );
     }
     assert!(!ours.is_empty(), "the native source found nothing at all");
+}
+
+/// The same claim on Linux, where the fallback is the same `lsof` and the
+/// native path is four files instead of a process.
+#[cfg(target_os = "linux")]
+#[test]
+fn the_proc_source_beats_lsof_by_an_order_of_magnitude() {
+    use quarry::source::SocketSource;
+
+    let mut native = quarry::linux::Proc::default();
+    let mut lsof = quarry::lsof::Lsof;
+
+    let _ = native.listening();
+    let _ = lsof.listening();
+
+    let started = Instant::now();
+    let ours = native.listening().expect("/proc is readable on Linux");
+    let native_time = started.elapsed();
+
+    // Not having `lsof` is the situation this source exists for, so its
+    // absence is not a failure of this test.
+    let started = Instant::now();
+    let Ok(theirs) = lsof.listening() else {
+        println!("  lsof unavailable here; nothing to compare against");
+        return;
+    };
+    let lsof_time = started.elapsed();
+
+    println!("\nsocket source:");
+    println!(
+        "  {:<44} {native_time:>9.3?}  ({} sockets)",
+        "native (/proc)",
+        ours.len()
+    );
+    println!(
+        "  {:<44} {lsof_time:>9.3?}  ({} sockets)",
+        "lsof",
+        theirs.len()
+    );
+
+    if theirs.len() >= 8 {
+        assert!(
+            native_time * 3 < lsof_time,
+            "/proc {native_time:?} vs lsof {lsof_time:?} over {} sockets — \
+             the native path is not paying for itself",
+            theirs.len()
+        );
+    } else {
+        println!(
+            "  only {} sockets here; too few to compare fairly",
+            theirs.len()
+        );
+    }
+}
+
+/// 0050 — what a refresh costs after the first one.
+///
+/// The first refresh has to listen to every socket once; every one after it
+/// should cost almost nothing. This is the number a person actually feels,
+/// because it repeats every six seconds for as long as quarry is open.
+#[test]
+fn a_refresh_is_cheap_once_the_machine_is_known() {
+    use quarry::app::App;
+    use quarry::engine::Engine;
+    use quarry::probe::{NetProber, Pool, Target, WORKERS};
+    use std::sync::Arc;
+
+    let mut engine = Engine::live();
+    let mut app = App::new();
+    app.ingest(engine.scan().expect("a scan of this machine").servers);
+
+    let round = |app: &mut App| -> (Duration, usize) {
+        let pool = Pool::with_workers(Arc::new(NetProber::default()), WORKERS);
+        let started = Instant::now();
+        let mut submitted = 0;
+        for s in &app.servers {
+            if let Some(l) = s.listeners.first() {
+                let mut t = Target::from_listener(s.pid, l, s.kind);
+                t.path = s.health_path.clone().unwrap_or_else(|| "/".to_string());
+                t.handshake = s.handshake.clone();
+                t.named = s.service.is_some();
+                t.silent_before = s.silent;
+                if pool.submit(t) {
+                    submitted += 1;
+                }
+            }
+        }
+        let outcomes = pool.collect(submitted, Duration::from_secs(10));
+        let waited = started.elapsed();
+        for o in outcomes {
+            app.apply_health(
+                o.pid,
+                o.port,
+                o.health,
+                o.banner,
+                o.confirmed,
+                o.certificate,
+            );
+        }
+        (waited, submitted)
+    };
+
+    let (first, n) = round(&mut app);
+    let (second, _) = round(&mut app);
+    println!("\nrefresh:");
+    println!(
+        "  {:<44} {first:>9.3?}  ({n} services)",
+        "first, listening to everything"
+    );
+    println!("  {:<44} {second:>9.3?}", "steady state");
+
+    if n < 8 {
+        println!("  only {n} services here; too few to say anything");
+        return;
+    }
+    // Generous against the measured 5ms, because CI runners are slow and
+    // shared. The line this holds is the old behaviour, which was 500ms.
+    assert!(
+        second < Duration::from_millis(250),
+        "a steady-state refresh took {second:?} over {n} services — \
+         every silent socket is being waited on again"
+    );
+    assert!(
+        second * 2 < first || first < Duration::from_millis(50),
+        "the first refresh ({first:?}) should be the expensive one, \
+         not every one ({second:?})"
+    );
 }

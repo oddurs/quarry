@@ -181,3 +181,103 @@ fn a_configured_health_path_is_the_one_requested() {
         other => panic!("expected an HTTP result, got {other:?}"),
     }
 }
+
+/// 0046 — telling a service that says it is unwell from one whose front door
+/// is broken, against real sockets, counting the requests it takes.
+mod degraded {
+    use super::*;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// A server that answers `/` and `/healthz` differently, and counts what
+    /// it was asked. The count is the point: a second request is the whole
+    /// cost of this feature, and it has to be bounded.
+    fn two_faced(health_status: u16, root_status: u16) -> (u16, Arc<AtomicUsize>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let asked = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&asked);
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { continue };
+                let counter = Arc::clone(&counter);
+                std::thread::spawn(move || {
+                    let mut buf = [0u8; 2048];
+                    let n = stream.read(&mut buf).unwrap_or(0);
+                    let request = String::from_utf8_lossy(&buf[..n]).to_string();
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    let status = if request.contains("/healthz") {
+                        health_status
+                    } else {
+                        root_status
+                    };
+                    let response = format!(
+                        "HTTP/1.1 {status} X\r\ncontent-length: 2\r\nconnection: close\r\n\r\nhi"
+                    );
+                    let _ = stream.write_all(response.as_bytes());
+                    let _ = stream.flush();
+                });
+            }
+        });
+        (port, asked)
+    }
+
+    fn probe_health_path(port: u16) -> Health {
+        let mut t = target(port, Kind::Api);
+        t.path = "/healthz".to_string();
+        t.path_is_a_health_check = true;
+        NetProber::default().probe(&t).health
+    }
+
+    /// The front door is fine and the service has diagnosed itself.
+    #[test]
+    fn a_service_failing_its_own_health_check_while_serving_is_degraded() {
+        let (port, asked) = two_faced(503, 200);
+        let health = probe_health_path(port);
+        assert!(
+            matches!(health, Health::Degraded { status: 503, .. }),
+            "{health:?}"
+        );
+        assert_eq!(asked.load(Ordering::SeqCst), 2, "the root was not asked");
+    }
+
+    /// A service that is well costs exactly one request, which is the whole
+    /// reason this is affordable: a hundred and fifty-one signatures name a
+    /// health path, and asking twice for each would double the probe budget.
+    #[test]
+    fn a_healthy_service_is_asked_once() {
+        let (port, asked) = two_faced(200, 200);
+        let health = probe_health_path(port);
+        assert!(
+            matches!(health, Health::Http { status: 200, .. }),
+            "{health:?}"
+        );
+        assert_eq!(
+            asked.load(Ordering::SeqCst),
+            1,
+            "a well service paid for a second request"
+        );
+    }
+
+    /// Both broken is not degraded — it is broken, and saying otherwise would
+    /// make the new state mean nothing.
+    #[test]
+    fn a_service_broken_at_the_front_door_too_is_simply_broken() {
+        let (port, _) = two_faced(503, 500);
+        let health = probe_health_path(port);
+        assert!(
+            matches!(health, Health::Http { status: 503, .. }),
+            "{health:?}"
+        );
+    }
+
+    /// No health path named means no second answer to want.
+    #[test]
+    fn a_service_with_no_health_path_is_never_asked_twice() {
+        let (port, asked) = two_faced(503, 200);
+        let mut t = target(port, Kind::Api);
+        t.path = "/".to_string();
+        let _ = NetProber::default().probe(&t);
+        assert_eq!(asked.load(Ordering::SeqCst), 1);
+    }
+}

@@ -26,7 +26,16 @@ pub const HTTP_TIMEOUT: Duration = Duration::from_millis(1800);
 /// the first pass could not identify. OrbStack's sshd, behind a VM boundary,
 /// needed about 50ms; 250 leaves room for something slower.
 pub const BANNER_WINDOW: Duration = Duration::from_millis(250);
-pub const WORKERS: usize = 12;
+
+/// How many probes run at once.
+///
+/// Not a CPU count. Every one of these threads spends its life blocked on a
+/// socket read — waiting out a banner window, or a connect that will not
+/// answer — so the right number is set by how much waiting there is to overlap,
+/// not by how many cores there are. On a machine with a hundred listening
+/// sockets, twelve workers meant a refresh took the better part of two seconds
+/// while almost nothing ran.
+pub const WORKERS: usize = 48;
 /// Beyond this many queued probes we start dropping, rather than building a
 /// backlog the user will never see the results of.
 pub const MAX_QUEUE: usize = 4096;
@@ -47,6 +56,27 @@ pub struct Target {
     /// A named handshake from the signature table, for protocols that will not
     /// speak until spoken to.
     pub handshake: Option<String>,
+    /// True when `path` is a health endpoint a signature named, rather than
+    /// the site root. Only then is there a second answer worth having: what
+    /// the front door says, as distinct from what the service says about
+    /// itself.
+    pub path_is_a_health_check: bool,
+    /// Whether the scan already knows what this is.
+    ///
+    /// A service the signature table has named gains nothing from being given
+    /// a quarter of a second to introduce itself — and that quarter second,
+    /// paid by every silent socket on the machine, was most of what a refresh
+    /// cost.
+    pub named: bool,
+    /// Whether this socket has already been given the window once and said
+    /// nothing.
+    ///
+    /// Most of what a developer machine is listening on — an editor's IPC
+    /// socket, a file-watching daemon, a vendor's update helper — will never
+    /// introduce itself. Waiting for it a second time buys exactly what the
+    /// first wait bought. A socket that appears anew is asked again, because
+    /// it is a new socket.
+    pub silent_before: bool,
 }
 
 impl Target {
@@ -61,6 +91,9 @@ impl Target {
             socket_path: None,
             path: "/".to_string(),
             handshake: None,
+            path_is_a_health_check: false,
+            named: false,
+            silent_before: false,
         }
     }
 
@@ -75,6 +108,9 @@ impl Target {
             kind,
             path: "/".to_string(),
             handshake: None,
+            path_is_a_health_check: false,
+            named: false,
+            silent_before: false,
         }
     }
 }
@@ -99,6 +135,10 @@ pub struct Outcome {
     /// What the service said, unprompted, if anything. Evidence for a second
     /// pass at identification.
     pub banner: Option<Vec<u8>>,
+    /// Whether a named handshake got the answer that protocol gives.
+    pub confirmed: Option<bool>,
+    /// What the service presented, where it speaks TLS.
+    pub certificate: Option<crate::certificate::Certificate>,
 }
 
 /// Everything one probe learned.
@@ -106,6 +146,13 @@ pub struct Outcome {
 pub struct Observation {
     pub health: Health,
     pub banner: Option<Vec<u8>>,
+    /// What a named handshake settled. `Some(false)` means quarry asked the
+    /// question this protocol answers and got something that was not the
+    /// answer — the port says one thing and the socket says another. `None`
+    /// means no handshake was named, or none was run.
+    pub confirmed: Option<bool>,
+    /// What the service presented, where it speaks TLS.
+    pub certificate: Option<crate::certificate::Certificate>,
 }
 
 impl From<Health> for Observation {
@@ -113,6 +160,8 @@ impl From<Health> for Observation {
         Observation {
             health,
             banner: None,
+            confirmed: None,
+            certificate: None,
         }
     }
 }
@@ -202,7 +251,20 @@ impl Prober for NetProber {
             &target.path,
             self.max_body,
         ) {
-            return h.into();
+            let h = self.degraded_or(h, target, first, &host);
+            // It answered over TLS, so there is a certificate to look at and
+            // this is the one place that knows it. One extra handshake per
+            // HTTPS service per scan — of which a developer machine has very
+            // few, and a service with none pays nothing.
+            let certificate = (first == "https")
+                .then(|| crate::tls::peek(sock, &host, self.connect_timeout))
+                .flatten();
+            return Observation {
+                health: h,
+                banner: None,
+                confirmed: None,
+                certificate,
+            };
         }
         let first_attempt = started.elapsed();
 
@@ -226,7 +288,16 @@ impl Prober for NetProber {
                 &target.path,
                 self.max_body,
             ) {
-                return h.into();
+                let h = self.degraded_or(h, target, second, &host);
+                let certificate = (second == "https")
+                    .then(|| crate::tls::peek(sock, &host, self.connect_timeout))
+                    .flatten();
+                return Observation {
+                    health: h,
+                    banner: None,
+                    confirmed: None,
+                    certificate,
+                };
             }
         }
 
@@ -244,6 +315,59 @@ impl Prober for NetProber {
 }
 
 impl NetProber {
+    /// Tell a service that says it is unwell from one whose front door is
+    /// broken.
+    ///
+    /// Those look identical from one request and call for different reactions.
+    /// Telling them apart needs a second answer, and the trick is when to ask
+    /// for it: **only when the health check already reported trouble**. A
+    /// service that is well costs nothing, which is almost all of them almost
+    /// all of the time — and a hundred and fifty-one signatures name a health
+    /// path, so asking on every success would have been a second request for
+    /// most of the HTTP services on a machine.
+    fn degraded_or(
+        &self,
+        health: Health,
+        target: &Target,
+        scheme: &'static str,
+        host: &str,
+    ) -> Health {
+        let Health::Http { status, .. } = health else {
+            return health;
+        };
+        if !target.path_is_a_health_check || status < 500 {
+            return health;
+        }
+        // Its own endpoint says it is unwell. Is the service there at all?
+        match http_probe(&self.agent, scheme, host, target.port, "/", self.max_body) {
+            Some(Health::Http {
+                status: root,
+                latency,
+                ..
+            }) if root < 400 => Health::Degraded { status, latency },
+            // The front door is no better, so this is simply broken.
+            _ => health,
+        }
+    }
+
+    /// How long to let this particular service introduce itself.
+    ///
+    /// Nothing at all when the scan already named it and no handshake is
+    /// waiting on the answer. A greeting from something we can already name
+    /// tells us what we know, and the wait is the single most expensive thing
+    /// a probe does.
+    fn banner_for(&self, target: &Target) -> Duration {
+        // A handshake is a question we are waiting on the answer to, so it
+        // always gets the window.
+        if target.handshake.is_some() {
+            return self.banner_window;
+        }
+        if target.named || target.silent_before {
+            return Duration::ZERO;
+        }
+        self.banner_window
+    }
+
     /// A unix socket is dialled by path. Everything else about it is the same:
     /// connect, listen for a greeting, ask if we know how.
     fn probe_unix(&self, target: &Target) -> Observation {
@@ -260,8 +384,9 @@ impl NetProber {
         };
         let latency = started.elapsed();
 
-        if !self.banner_window.is_zero() {
-            let _ = stream.set_read_timeout(Some(self.banner_window));
+        let window = self.banner_for(target);
+        if !window.is_zero() {
+            let _ = stream.set_read_timeout(Some(window));
             let mut buf = [0u8; 256];
             if let Ok(n) = (&stream).read(&mut buf)
                 && n > 0
@@ -269,6 +394,8 @@ impl NetProber {
                 return Observation {
                     health: Health::Open { latency },
                     banner: Some(buf[..n].to_vec()),
+                    confirmed: None,
+                    certificate: None,
                 };
             }
         }
@@ -284,27 +411,54 @@ impl NetProber {
         };
         let latency = started.elapsed();
 
-        let banner = read_banner(&stream, self.banner_window);
-        if banner.is_some() {
+        let health = Health::Open { latency };
+        let banner = read_banner(&stream, self.banner_for(target));
+        if let Some(greeting) = banner {
+            // It spoke first. Whether that greeting is the protocol we expected
+            // is the same question, asked of a different set of bytes.
+            let confirmed = target
+                .handshake
+                .as_deref()
+                .map(|name| handshake::confirms(name, &greeting));
             return Observation {
-                health: Health::Open { latency },
-                banner,
+                health,
+                banner: Some(greeting),
+                confirmed,
+                certificate: None,
             };
         }
 
         // Silent. If the signature named a handshake, this is where it is worth
         // spending a round trip.
-        if let Some(name) = &target.handshake
-            && let Some(reply) = handshake::run(name, &stream, self.banner_window)
-        {
+        let Some(name) = &target.handshake else {
             return Observation {
-                health: Health::Open { latency },
-                banner: Some(reply),
+                health,
+                banner: None,
+                confirmed: None,
+                certificate: None,
             };
-        }
-        Observation {
-            health: Health::Open { latency },
-            banner: None,
+        };
+        match handshake::run(name, &stream, self.banner_window) {
+            Some(reply) => Observation {
+                confirmed: Some(handshake::confirms(name, &reply)),
+                health,
+                banner: Some(reply),
+                certificate: None,
+            },
+            // We knew the question and it did not answer. That is not nothing:
+            // a PostgreSQL that ignores an SSLRequest is not a PostgreSQL.
+            None if handshake::is_known(name) => Observation {
+                health,
+                banner: None,
+                confirmed: Some(false),
+                certificate: None,
+            },
+            None => Observation {
+                health,
+                banner: None,
+                confirmed: None,
+                certificate: None,
+            },
         }
     }
 }
@@ -410,6 +564,8 @@ impl Pool {
                         port: target.port,
                         health: observed.health,
                         banner: observed.banner,
+                        confirmed: observed.confirmed,
+                        certificate: observed.certificate,
                     };
                     if out.send(outcome).is_err() {
                         return;
