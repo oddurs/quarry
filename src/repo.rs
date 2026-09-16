@@ -71,16 +71,35 @@ fn read(work_tree: &Path, dot: &Path) -> Repo {
         .map(|r| r.join(".git"))
         .unwrap_or_else(|| git_dir.clone());
 
-    Repo {
-        main_root: name_source.to_path_buf(),
-        name: name_source
+    let remote = read_remote(&config_dir);
+    let directory = || {
+        name_source
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| name_source.display().to_string()),
+            .unwrap_or_else(|| name_source.display().to_string())
+    };
+
+    Repo {
+        main_root: name_source.to_path_buf(),
+        // The repository's own name, where it has one. A checkout is a local
+        // copy and its directory is whatever the person cloning it felt like
+        // typing — `astralia` for a repository called `cairn`, `NetherC` for
+        // one called `nether-c`. The remote is the name the project answers
+        // to everywhere else.
+        name: remote
+            .as_deref()
+            .and_then(repository_name)
+            .unwrap_or_else(directory),
         root: work_tree.to_path_buf(),
         branch: read_branch(&git_dir),
-        remote: read_remote(&config_dir),
+        remote,
     }
+}
+
+/// `oddurs/cairn` is a repository called `cairn`.
+fn repository_name(remote: &str) -> Option<String> {
+    let name = remote.rsplit('/').next()?.trim();
+    (!name.is_empty()).then(|| name.to_string())
 }
 
 /// A worktree's or submodule's `.git` is a file pointing at the real git dir.
@@ -199,7 +218,10 @@ mod tests {
         fs::create_dir_all(&deep).expect("create nested dirs");
 
         let found = find(&deep).expect("repo found from a nested path");
-        assert_eq!(found.name, "acme");
+        // The directory is `acme`; the repository is `web`. A checkout is a
+        // local copy and its directory is whatever the person cloning it felt
+        // like typing.
+        assert_eq!(found.name, "web");
         assert_eq!(found.root, root);
         assert_eq!(found.branch.as_deref(), Some("main"));
         assert_eq!(found.remote.as_deref(), Some("acme/web"));
@@ -270,6 +292,42 @@ mod tests {
         let two = find(&two).expect("repo b");
         assert_eq!(one.name, two.name, "the fixture is the case being tested");
         assert_ne!(one.main_root, two.main_root);
+    }
+
+    /// With no remote there is nothing to prefer, so the directory stands.
+    #[test]
+    fn a_repository_with_no_remote_is_named_by_its_directory() {
+        let tmp = TempDir::new().expect("tempdir");
+        let root = repo(&tmp, "sketchbook", "ref: refs/heads/main\n", None);
+        let found = find(&root).expect("repo found");
+        assert_eq!(found.name, "sketchbook");
+        assert_eq!(found.remote, None);
+    }
+
+    /// Every worktree of one project answers to the same name, which is the
+    /// repository's, not the directory any particular checkout sits in.
+    #[test]
+    fn a_worktree_is_named_after_the_repository_not_its_directory() {
+        let tmp = TempDir::new().expect("tempdir");
+        let main = repo(
+            &tmp,
+            "local-name",
+            "ref: refs/heads/main\n",
+            Some("git@github.com:oddurs/cairn.git"),
+        );
+        let wt_git = main.join(".git/worktrees/wip");
+        fs::create_dir_all(&wt_git).expect("create worktree git dir");
+        fs::write(wt_git.join("HEAD"), "ref: refs/heads/wip\n").expect("write HEAD");
+        let checkout = tmp.path().join(".worktrees/anything-at-all");
+        fs::create_dir_all(&checkout).expect("create checkout");
+        fs::write(
+            checkout.join(".git"),
+            format!("gitdir: {}\n", wt_git.display()),
+        )
+        .expect("write .git file");
+
+        assert_eq!(find(&checkout).expect("worktree resolves").name, "cairn");
+        assert_eq!(find(&main).expect("main resolves").name, "cairn");
     }
 
     #[test]

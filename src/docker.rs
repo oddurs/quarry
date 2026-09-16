@@ -53,6 +53,18 @@ impl Container {
         self.service.as_deref().unwrap_or(&self.name)
     }
 
+    /// A name somebody meant, or nothing.
+    ///
+    /// The Compose service name first: it is the word written in the file, and
+    /// it is chosen to say what the thing is — `postgres`, `grpc`, `worker`.
+    /// Then the container's own name, unless Docker invented it.
+    pub fn chosen_name(&self) -> Option<&str> {
+        if let Some(service) = self.service.as_deref() {
+            return Some(service);
+        }
+        (!looks_generated(&self.name)).then_some(self.name.as_str())
+    }
+
     /// The image's bare repository name: `mongo:7` is `mongo`, and
     /// `quay.io/minio/minio:latest` is `minio`.
     ///
@@ -75,6 +87,26 @@ impl Container {
             None => self.state == "running",
         }
     }
+}
+
+/// Whether Docker made this name up.
+///
+/// A container started without `--name` is given an adjective and a scientist
+/// — `beautiful_heisenberg`, `goofy_diffie` — from two word lists. Seven of
+/// them on one machine, all running the same image, and not one of the names
+/// says what any of them is doing.
+///
+/// Detected by shape rather than by shipping both word lists: two lowercase
+/// words joined by an underscore. Compose uses hyphens and so does almost
+/// everyone naming a container by hand, so the shape is close to exclusive. A
+/// container deliberately named `my_app` is read as generated and shown by its
+/// image instead — which is a mild wrong answer, and arguably a more useful one.
+fn looks_generated(name: &str) -> bool {
+    let Some((adjective, surname)) = name.split_once('_') else {
+        return false;
+    };
+    let word = |w: &str| w.len() >= 3 && w.chars().all(|c| c.is_ascii_lowercase());
+    word(adjective) && word(surname)
 }
 
 /// Published host port → the container behind it.
@@ -631,5 +663,86 @@ mod image_tests {
             named("redis.example.com/acme/billing:2").image_name(),
             "billing"
         );
+    }
+}
+
+#[cfg(test)]
+mod naming_tests {
+    use super::*;
+
+    fn container(name: &str, service: Option<&str>, image: &str) -> Container {
+        Container {
+            id: "x".into(),
+            socket: "/var/run/docker.sock".into(),
+            name: name.to_string(),
+            image: image.to_string(),
+            state: "running".into(),
+            health: None,
+            project: None,
+            service: service.map(str::to_string),
+            working_dir: None,
+        }
+    }
+
+    /// The word written in the Compose file, which is chosen to say what the
+    /// thing is.
+    #[test]
+    fn a_compose_service_name_is_a_name_somebody_meant() {
+        let c = container("stack-postgres-1", Some("postgres"), "postgres:16");
+        assert_eq!(c.chosen_name(), Some("postgres"));
+    }
+
+    /// `--name my-api` is somebody saying what it is.
+    #[test]
+    fn a_name_given_by_hand_is_kept() {
+        assert_eq!(
+            container("my-api", None, "nginx:alpine").chosen_name(),
+            Some("my-api")
+        );
+        assert_eq!(
+            container("redis1", None, "redis:7").chosen_name(),
+            Some("redis1")
+        );
+        // Compose's own naming uses hyphens and is not generated.
+        assert_eq!(
+            container("quarry-taxonomy-redis-1", None, "redis:7").chosen_name(),
+            Some("quarry-taxonomy-redis-1")
+        );
+    }
+
+    /// Seven of these on one machine, all running the same image, and not one
+    /// of the names says what any of them is doing.
+    #[test]
+    fn a_name_docker_invented_is_no_name_at_all() {
+        for invented in [
+            "beautiful_heisenberg",
+            "goofy_diffie",
+            "dazzling_goldstine",
+            "intelligent_mcnulty",
+        ] {
+            assert_eq!(
+                container(invented, None, "rust:1-slim").chosen_name(),
+                None,
+                "{invented} was taken for a name somebody chose"
+            );
+        }
+    }
+
+    /// The shape is close to exclusive but not quite. Stated rather than
+    /// pretended away.
+    #[test]
+    fn a_hand_written_name_of_the_same_shape_is_read_as_generated() {
+        // Two real lowercase words joined by an underscore is the shape, and
+        // this one is a person's. It will be shown by its image instead.
+        assert_eq!(container("web_server", None, "nginx").chosen_name(), None);
+
+        // Anything else about the name is enough to keep it: a short word, a
+        // digit, a capital, a hyphen, or more than one underscore.
+        for safe in ["my_app", "app_2", "My_App", "my-app", "a_b_c"] {
+            assert!(
+                container(safe, None, "nginx").chosen_name().is_some(),
+                "{safe} was taken for a name Docker invented"
+            );
+        }
     }
 }

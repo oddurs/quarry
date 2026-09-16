@@ -192,11 +192,18 @@ impl Server {
     /// What to call this service in a list: the name the signature gave it, or
     /// failing that the process, tidied.
     pub fn service_name(&self) -> String {
-        // The container first: the daemon knows what is behind the port, and a
-        // signature can only guess from the host process that published it —
-        // which is the runtime, and says nothing about the service.
+        // A container is named by whoever ran it, and half the time that is
+        // Docker rather than a person. In order of how much somebody meant it:
+        // the name they chose, then what the image says it is running.
         if let Some(container) = &self.container {
-            return container.display_name().to_string();
+            if let Some(chosen) = container.chosen_name() {
+                return chosen.to_string();
+            }
+            // The image over the signature: the image is what is running, and
+            // the signature is a guess made from it. `nginx:alpine` matched
+            // "Nginx Proxy Manager", which is a different piece of software
+            // that happens to have nginx in its name.
+            return container.image_name().to_string();
         }
         if let Some(name) = &self.service {
             return name.clone();
@@ -213,9 +220,6 @@ impl Server {
         if let Some(project) = self.container.as_ref().and_then(|c| c.project.as_deref()) {
             return project.to_string();
         }
-        if let Some(folder) = self.folder_name() {
-            return folder;
-        }
         friendly_process(&self.command, &self.cmdline)
     }
 
@@ -231,9 +235,11 @@ impl Server {
         if let Some(project) = self.container.as_ref().and_then(|c| c.project.as_deref()) {
             return project.to_string();
         }
-        if let Some(folder) = self.folder_name() {
-            return folder;
-        }
+        // Deliberately no fall back to the working directory. A directory is
+        // where a process happens to have been started, not a project it
+        // belongs to, and on a real machine that produced groups called
+        // `Data`, `Code`, `Helpers` and `Application` — the innards of
+        // application bundles, named after nothing anybody is working on.
         if self.kind == Kind::System {
             "system".into()
         } else {
@@ -276,9 +282,7 @@ impl Server {
     pub fn group_source(&self) -> GroupSource {
         if self.repo.is_some() {
             GroupSource::Repo
-        } else if self.container.as_ref().is_some_and(|c| c.project.is_some())
-            || self.folder_name().is_some()
-        {
+        } else if self.container.as_ref().is_some_and(|c| c.project.is_some()) {
             // A Compose project and a directory are the same kind of claim: a
             // name that came from somewhere real, but not from a repository.
             GroupSource::Folder

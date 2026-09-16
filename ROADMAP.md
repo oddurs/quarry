@@ -51,7 +51,7 @@ quarry sits open. A scan every six seconds that costs 111ms is a tool you
 
 ## v0.4 — First-class support for every kind of server
 
-`##########` 96% · 22 of 23 done
+`##########` 96% · 23 of 24 done
 
 quarry sees listening TCP sockets, guesses what they are from a port table and a
 
@@ -83,6 +83,7 @@ quarry sees listening TCP sockets, guesses what they are from a port table and a
 - [x] `0048` Several containers on one runtime process are shown as one service <sup>bug · p0 · discovery</sup>
 - [x] `0049` A containerised service is classified as a container, not as what it is <sup>bug · p1 · discovery</sup>
 - [x] `0050` A refresh costs two seconds on a machine with a hundred sockets <sup>bug · p0 · probe</sup>
+- [x] `0051` Prefer the repository's own name, and stop inventing projects from folders <sup>feature · p1 · attribution</sup>
 
 ## Unscheduled
 

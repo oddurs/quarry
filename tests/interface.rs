@@ -1254,3 +1254,82 @@ mod listening_once {
         );
     }
 }
+
+/// Naming: prefer what somebody meant, then what is running.
+mod naming {
+    use super::*;
+    use quarry::docker::Container;
+
+    fn containerised(name: &str, service: Option<&str>, image: &str) -> Server {
+        let mut s = server(5432, "com.docker.backend")
+            .kind(Kind::Container)
+            .build();
+        s.container = Some(Container {
+            id: "x".into(),
+            socket: "/var/run/docker.sock".into(),
+            name: name.to_string(),
+            image: image.to_string(),
+            state: "running".into(),
+            health: None,
+            project: None,
+            service: service.map(str::to_string),
+            working_dir: None,
+        });
+        s
+    }
+
+    #[test]
+    fn a_container_says_what_it_is_running_when_nobody_named_it() {
+        assert_eq!(
+            containerised("beautiful_heisenberg", None, "rust:1-slim").service_name(),
+            "rust"
+        );
+        assert_eq!(
+            containerised("goofy_diffie", None, "quay.io/minio/minio:latest").service_name(),
+            "minio"
+        );
+    }
+
+    #[test]
+    fn a_name_somebody_chose_wins() {
+        assert_eq!(
+            containerised("my-api", None, "nginx:alpine").service_name(),
+            "my-api"
+        );
+        assert_eq!(
+            containerised("stack-db-1", Some("postgres"), "postgres:16").service_name(),
+            "postgres"
+        );
+    }
+
+    /// The image is what is running; a signature derived from it is a guess.
+    /// `nginx:alpine` matched "Nginx Proxy Manager", which is different
+    /// software that happens to have nginx in its name.
+    #[test]
+    fn the_image_beats_a_guess_made_from_it() {
+        let mut s = containerised("beautiful_heisenberg", None, "nginx:alpine");
+        s.service = Some("Nginx Proxy Manager".into());
+        assert_eq!(s.service_name(), "nginx");
+    }
+
+    /// A directory is where a process happens to have been started, not a
+    /// project it belongs to.
+    #[test]
+    fn a_folder_is_not_a_project() {
+        let mut s = server(3000, "node").build();
+        s.cwd = Some(std::path::PathBuf::from(
+            "/Users/someone/Library/Containers/com.docker.docker/Data",
+        ));
+        assert_eq!(s.group_key(), "unattributed");
+        assert_ne!(s.title(), "Data");
+    }
+
+    /// But it is still shown, in the pane that exists to say where something
+    /// is running.
+    #[test]
+    fn the_directory_is_still_reported() {
+        let mut s = server(3000, "node").build();
+        s.cwd = Some(std::path::PathBuf::from("/Users/someone/Code/sketch"));
+        assert_eq!(s.folder_name().as_deref(), Some("sketch"));
+    }
+}
