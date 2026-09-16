@@ -1,20 +1,20 @@
  quarry  5 listening · 2 projects · 2 unhealthy                                    updated just now
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-╭ Services ────────────────────────────────────────╮╭ Detail ──────────────────────────────────────╮
-│ ▾ acme-api  feat/billing  acme/acme-api         1││ ● acme-api                                   │
-│▌ ●  8000 python3 uvicorn         api  200   31ms ││   python3 uvicorn · api · pid 18000          │
-│ ▾ acme-web  main  acme/acme-web             ✕1  2││                                              │
-│  ●  3000 next-server╭──────────────────────────────────────────────────────╮                     │
-│  ▲  3001 node worker│                                                      │ ↗                   │
-│ ▾ no project        │  Stop acme-api (pid 18000)?                          │                     │
-│  ●  5432 postgres   │  python3 on :8000                                    │                     │
-│  ✕  6379 redis-serve│                                                      │                     │
-│                     │  y confirm    n / esc cancel                         │                     │
+╭ Services ──────────────────────────────────────────╮╭ Detail ────────────────────────────────────╮
+│ ▾ acme-web  main  acme/acme-web               ✕1  2││ ● acme-web                                 │
+│▌ ●  3000 next-server               web  200   12ms ││   next-server · web · pid 13000            │
+│  ▲  3001 node worker.js            api  503  8.0ms ││                                            │
+│ ▾ no project        ╭──────────────────────────────────────────────────────╮                     │
+│  ●  5432 postgres   │                                                      │0  ↗                 │
+│  ✕  6379 redis-serve│  Stop acme-web?                                      │                     │
+│ ▾ acme-api  feat/bil│  SIGTERM 13000 · node on :3000                       │                     │
+│  ●  8000 python3 uvi│                                                      │                     │
+│                     │  y confirm    n / esc cancel                         │oard                 │
 │                     ╰──────────────────────────────────────────────────────╯                     │
-│                                                  ││ LISTENING                                    │
-│                                                  ││   8000  127.0.0.1  loopback                  │
-│                                                  ││                                              │
-│                                                  ││ REPOSITORY                                   │
-│                                                  ││   acme-api                                   │
-╰──────────────────────────────────────────────────╯╰──────────────────────────────────────────────╯
- ↑↓ move  ↵ open  y copy  / filter  a all  K stop  r refresh  ? help
+│                                                    ││                                            │
+│                                                    ││ LISTENING                                  │
+│                                                    ││   3000  127.0.0.1  loopback                │
+│                                                    ││                                            │
+│                                                    ││ REPOSITORY                                 │
+╰────────────────────────────────────────────────────╯╰────────────────────────────────────────────╯
+ ↑↓ move  ↵ open  y copy  / filter  a all  . here  K stop  R restart  r refresh  ? help
