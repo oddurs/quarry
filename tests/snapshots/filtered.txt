@@ -1,7 +1,7 @@
  quarry  1 listening · 0 projects · 1 unhealthy · “redis” · 4 hidden                                 updated just now
 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 ╭ Services ────────────────────────────────────────────────────────────╮╭ Detail ────────────────────────────────────╮
-│ ▾ no project                                                    ✕1  1││ ✕ redis-server                             │
+│ ▾ no project                                                  ✕1  1  ││ ✕ redis-server                             │
 │▌ ✕  6379 redis-server                              cache  no answer  ││   redis-server · cache · pid 16379         │
 │                                                                      ││                                            │
 │                                                                      ││ ADDRESS                                    │

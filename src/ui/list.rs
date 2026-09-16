@@ -85,6 +85,18 @@ pub(super) fn draw_list(f: &mut Frame, app: &mut App, t: &Theme, area: Rect) {
             LABEL_MAX.min(inner_width.min(ROW_MAX) / 3).max(PORT_WIDTH),
         );
 
+    // The widest kind on screen, so the column is one width for every row.
+    let badge_width = app
+        .rows
+        .iter()
+        .filter_map(|r| match r {
+            Row::Server(i) => Some(app.servers[*i].kind.label().chars().count()),
+            Row::Group(_) | Row::Launcher(_) => None,
+        })
+        .max()
+        .unwrap_or(0);
+    let columns = Columns::fit(inner_width.min(ROW_MAX), label_width, badge_width);
+
     let cursor = app.selected.saturating_sub(app.offset);
     let items: Vec<ListItem> = window
         .iter()
@@ -97,14 +109,7 @@ pub(super) fn draw_list(f: &mut Frame, app: &mut App, t: &Theme, area: Rect) {
             let line = match row {
                 Row::Group(g) => group_line(app, t, *g, row_width, selected),
                 Row::Launcher(l) => launcher_line(app, t, *l, row_width, selected),
-                Row::Server(s) => server_line(
-                    &app.servers[*s],
-                    t,
-                    row_width,
-                    label_width,
-                    app.now,
-                    selected,
-                ),
+                Row::Server(s) => server_line(&app.servers[*s], t, columns, app.now, selected),
             };
             // Never both: two highlights on one line is one too many, and the
             // cursor is the one that has to win.
@@ -217,9 +222,13 @@ fn group_line(app: &App, t: &Theme, idx: usize, width: usize, selected: bool) ->
         format!("{} ", g.count)
     };
     let marker = if collapsed { "▸ " } else { "▾ " };
+    // The gutter and one space of gap: without them a long name ran into the
+    // count, which at twenty columns read as `no project✕1  4`.
     let mut budget = width
+        .saturating_sub(1)
         .saturating_sub(marker.chars().count())
-        .saturating_sub(right.chars().count());
+        .saturating_sub(right.chars().count())
+        .saturating_sub(GAP);
 
     let name = truncate(&name, budget);
     budget = budget.saturating_sub(name.chars().count());
@@ -302,14 +311,64 @@ fn launcher_line(app: &App, t: &Theme, idx: usize, width: usize, selected: bool)
     ])
 }
 
-fn server_line(
-    s: &Server,
-    t: &Theme,
-    width: usize,
-    label_width: usize,
-    now: u64,
-    selected: bool,
-) -> Line<'static> {
+/// What every row shows, decided once for the whole list.
+///
+/// Per row it was ragged. `mail` is four characters and `metrics` is seven, so
+/// at a width where one of them fit and the other did not, one row kept its
+/// kind and the next lost it — and the columns stopped lining up down the
+/// page, which is the only thing a column is for. A column is now present for
+/// every row or for none of them.
+#[derive(Clone, Copy)]
+struct Columns {
+    /// The port, or a socket's name, right-aligned.
+    label: usize,
+    /// The kind, at the width of the widest one on screen. `None` when there
+    /// is no room for it — the colour of the row still carries the kind, and
+    /// a name is worth more than a word repeating what the colour said.
+    badge: Option<usize>,
+    /// The status, and whether it is the long form.
+    status: usize,
+    short_status: bool,
+    name: usize,
+}
+
+/// The narrowest a name may be before something else has to go.
+const MIN_NAME: usize = 14;
+/// One space between the name and whatever follows it, so a name that fills
+/// its column does not run into the next.
+const GAP: usize = 1;
+
+impl Columns {
+    /// Fit the columns to the width there is, dropping them in the order they
+    /// can be spared: the kind first, since the colour already carries it,
+    /// then the latency, then the name gives up whatever is left.
+    fn fit(width: usize, label: usize, badge: usize) -> Columns {
+        // "  " + dot + " " + label, then one trailing space at the end.
+        let lead = 2 + 1 + 1 + label + 1;
+        let avail = width.saturating_sub(lead + 1);
+        const FULL_STATUS: usize = 10;
+        let short = 5;
+        let badge_cost = badge + 2;
+
+        let (badge, status, short_status) = if avail >= badge_cost + FULL_STATUS + MIN_NAME + GAP {
+            (Some(badge), FULL_STATUS, false)
+        } else if avail >= FULL_STATUS + MIN_NAME + GAP {
+            (None, FULL_STATUS, false)
+        } else {
+            (None, short, true)
+        };
+        let reserved = status + badge.map_or(0, |b| b + 2);
+        Columns {
+            label,
+            badge,
+            status,
+            short_status,
+            name: avail.saturating_sub(reserved),
+        }
+    }
+}
+
+fn server_line(s: &Server, t: &Theme, cols: Columns, now: u64, selected: bool) -> Line<'static> {
     let (dot, dot_color) = (s.health.glyph(), t.health(&s.health));
     // The column between the selection bar and the health dot was already a
     // blank space, so marking an arrival costs no width and shifts nothing.
@@ -323,55 +382,33 @@ fn server_line(
     // like making it, and letting it size the column pushed the name, the kind
     // and the status off their lines for every other row on screen.
     let port = format!(
-        "{:>label_width$}",
-        truncate(&s.primary_column(), label_width)
+        "{:>width$}",
+        truncate(&s.primary_column(), cols.label),
+        width = cols.label
     );
     let extra_ports = if s.listeners.len() > 1 {
         format!(" +{}", s.listeners.len() - 1)
     } else {
         String::new()
     };
-    let badge = s.kind.label();
-    let (status_full, status_color) = status_cell(&s.health, t);
-    let status_short = status_abbrev(&s.health);
-
-    // "  " + dot + " " + port, then one trailing space at the end. The count
-    // of further listeners is deliberately not here: it appears on one row in
-    // twenty, and in the lead it moved that row's name column out of line with
-    // every other row on screen. It is spent out of the name's budget instead.
-    let lead = 2 + 1 + 1 + port.chars().count() + 1;
-    let avail = width.saturating_sub(lead + 1);
-
-    // The name is the row. Everything else is an attribute of it, so
-    // everything else goes first: the kind — which the colour and often the
-    // name already imply — then the latency. `Sync…storage` is not a row worth
-    // keeping a badge for.
-    const MIN_NAME: usize = 14;
-    // One space of it is the gap before whatever follows, so a name that fills
-    // its column does not run into the badge.
-    const GAP: usize = 1;
-    let badge_cost = badge.chars().count() + 2;
-    let (show_badge, status) = if avail >= badge_cost + status_full.chars().count() + MIN_NAME {
-        (true, status_full.clone())
-    } else if avail >= status_full.chars().count() + MIN_NAME {
-        (false, status_full.clone())
-    } else {
-        (false, status_short.clone())
+    let (status_text, status_color) = match cols.short_status {
+        true => (status_abbrev(&s.health), t.health(&s.health)),
+        false => status_cell(&s.health, t),
     };
 
-    let reserved = status.chars().count() + if show_badge { badge_cost } else { 0 };
-    let name_width = avail.saturating_sub(reserved);
+    // Marks that cost a column each, and only where they say something.
     let doubt = usize::from(s.unconfirmed)
         + usize::from(s.exposed.is_some())
         + usize::from(s.certificate_trouble(now).is_some());
     let name = truncate(
         &s.service_name(),
-        name_width
+        cols.name
             .saturating_sub(GAP)
             .saturating_sub(extra_ports.chars().count())
             .saturating_sub(doubt),
     );
-    let pad = name_width
+    let pad = cols
+        .name
         .saturating_sub(name.chars().count())
         .saturating_sub(extra_ports.chars().count())
         .saturating_sub(doubt);
@@ -412,13 +449,16 @@ fn server_line(
         Span::styled(extra_ports, Style::default().fg(t.faint)),
         Span::raw(" ".repeat(pad)),
     ];
-    if show_badge {
+    if let Some(badge_width) = cols.badge {
         spans.push(Span::styled(
-            format!("{badge}  "),
+            format!("{:>width$}  ", s.kind.label(), width = badge_width),
             Style::default().fg(t.kind(s.kind)),
         ));
     }
-    spans.push(Span::styled(status, Style::default().fg(status_color)));
+    spans.push(Span::styled(
+        format!("{:>width$}", status_text, width = cols.status),
+        Style::default().fg(status_color),
+    ));
     spans.push(Span::raw(" "));
     Line::from(spans)
 }

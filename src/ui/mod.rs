@@ -22,8 +22,18 @@ const SPINNER: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 /// holds — a path, or `usage   0.5% cpu · 64 MB rss`.
 const DETAIL_WIDTH: u16 = 46;
 
+/// What the list wants: a full row, plus its own borders. Anything beyond this
+/// is spent on the detail pane instead.
+const LIST_WIDTH: u16 = 74;
+
 /// Below this the list is not worth reading, so the detail pane gives way.
-const MIN_LIST: u16 = 44;
+///
+/// Not a round number: it is what one complete row needs. A port and the
+/// widest kind and a readable name and a latency come to forty-six columns,
+/// plus two for the pane's own borders. Any narrower and the pane would be
+/// bought by taking a column off every row in the list, which is the wrong way
+/// round — on a narrow terminal the list *is* the tool.
+const MIN_LIST: u16 = 48;
 
 mod detail;
 mod export;
@@ -63,10 +73,16 @@ pub fn draw(f: &mut Frame, app: &mut App, tick: usize) {
     // that was being read. So it takes a fixed width, the list takes the rest,
     // and on a terminal too narrow to afford both it goes away.
     let show_detail = app.detail && area.width >= DETAIL_WIDTH + MIN_LIST;
+    // The list takes what a row needs and no more; the detail pane takes the
+    // rest. The other way round put every spare column into the gap between a
+    // service's name and its latency, where it did nothing — while the pane
+    // holding paths and command lines, which are as long as they are, stayed
+    // at its minimum and wrapped them.
     let split = Layout::default()
         .direction(Direction::Horizontal)
         .constraints(if show_detail {
-            [Constraint::Min(MIN_LIST), Constraint::Length(DETAIL_WIDTH)]
+            let list = (LIST_WIDTH).min(area.width - DETAIL_WIDTH).max(MIN_LIST);
+            [Constraint::Length(list), Constraint::Min(DETAIL_WIDTH)]
         } else {
             [Constraint::Percentage(100), Constraint::Length(0)]
         })
@@ -167,17 +183,47 @@ fn draw_titlebar(f: &mut Frame, app: &App, t: &Theme, area: Rect, tick: usize) {
         left.extend(tally);
     }
 
+    // Two widgets over one line, so they have to be fitted to each other
+    // rather than each to the area. Drawn independently they collided: at
+    // twenty columns the clock was painted straight through `quarry` and the
+    // line came out a character short.
+    let status = scan_status(app, tick);
+    let spent: usize = left.iter().map(|s| s.content.chars().count()).sum();
+    let room = area.width as usize;
+    let fits = spent + status.chars().count() < room;
+
+    // The identity and the count come first; the clock is what goes.
+    if !fits {
+        let keep = room.saturating_sub(1);
+        let mut used = 0;
+        left.retain(|span| {
+            let n = span.content.chars().count();
+            if used + n <= keep {
+                used += n;
+                true
+            } else {
+                false
+            }
+        });
+    }
+    // Painted to the full width either way: a line that stops short leaves
+    // whatever was in those cells before, and the title bar is the one row
+    // that changes on every tick.
+    let painted: usize = left.iter().map(|s| s.content.chars().count()).sum();
+    left.push(Span::raw(" ".repeat(room.saturating_sub(painted))));
     f.render_widget(Line::from(left), area);
-    let style = if app.is_stale() {
-        Style::default().fg(t.server_error).bold()
-    } else {
-        Style::default().fg(t.muted)
-    };
-    f.render_widget(
-        Paragraph::new(Line::from(Span::styled(scan_status(app, tick), style)))
-            .alignment(Alignment::Right),
-        area,
-    );
+
+    if fits {
+        let style = if app.is_stale() {
+            Style::default().fg(t.server_error).bold()
+        } else {
+            Style::default().fg(t.muted)
+        };
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(status, style))).alignment(Alignment::Right),
+            area,
+        );
+    }
 }
 
 /// `4 projects` — a number and what it counts, which is the shape of every

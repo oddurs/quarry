@@ -534,3 +534,123 @@ fn footer_hints_drop_whole_rather_than_clipping() {
         }
     }
 }
+
+/// Responsive: a column belongs to the frame, not to a row.
+///
+/// The failure this guards against is subtle and was real — `mail` is four
+/// characters and `metrics` is seven, so at a width where one fitted and the
+/// other did not, one row kept its kind and the next lost it, and the columns
+/// stopped lining up down the page.
+#[test]
+fn every_row_shows_the_same_columns_at_every_width() {
+    for width in 28..=160u16 {
+        let mut app = loaded();
+        let screen = ui::render_to_string(&mut app, width, 16, 0);
+        // Service rows only: a group heading carries `✕` in its trouble count
+        // and is a different shape entirely.
+        let rows: Vec<&str> = screen
+            .lines()
+            .filter(|l| !l.contains('▾') && !l.contains('▸'))
+            .filter(|l| l.chars().any(|c| "●○✕▲◆◌◍".contains(c)))
+            .collect();
+        assert!(!rows.is_empty(), "no service rows at {width}");
+
+        // The kind is shown for every row or for none. Asserted on the column
+        // rather than on the text, because `mail` is four characters and
+        // `metrics` is seven — which is exactly how it used to go wrong.
+        let kinds = [
+            "web", "api", "db", "cache", "mail", "metrics", "tunnel", "queue",
+        ];
+        let has_kind: Vec<bool> = rows
+            .iter()
+            .map(|r| kinds.iter().any(|k| r.contains(&format!(" {k}  "))))
+            .collect();
+        assert!(
+            has_kind.windows(2).all(|w| w[0] == w[1]),
+            "at {width} columns some rows show their kind and some do not:\n{}",
+            rows.join("\n")
+        );
+    }
+}
+
+/// Nothing may overflow, at any width a terminal can be. Lines may be shorter
+/// — `render_to_string` trims the trailing spaces — but never longer.
+#[test]
+fn the_frame_fits_at_every_width() {
+    for width in 20..=200u16 {
+        let mut app = loaded();
+        for line in ui::render_to_string(&mut app, width, 14, 0).lines() {
+            assert!(
+                line.chars().count() <= width as usize,
+                "a line overflows at {width} columns: {line:?}"
+            );
+        }
+    }
+}
+
+/// The title bar draws two things over one line — the identity on the left and
+/// the clock on the right — and drawing them independently made them collide:
+/// at twenty columns the clock was painted straight through `quarry`.
+#[test]
+fn the_title_bar_never_paints_over_itself() {
+    for width in 20..=200u16 {
+        let mut app = loaded();
+        let screen = ui::render_to_string(&mut app, width, 8, 0);
+        let title = screen.lines().next().expect("a title bar");
+        assert!(
+            title.starts_with(" quarry"),
+            "at {width} columns the title bar is {title:?}"
+        );
+        // The clock is there in full or not at all, never half-painted.
+        if title.contains("updated") {
+            assert!(
+                title.ends_with("just now") || title.contains(" ago "),
+                "at {width} columns the clock is cut: {title:?}"
+            );
+        }
+    }
+}
+
+/// The detail pane appears only when the list can still show a complete row —
+/// on a narrow terminal the list is the tool.
+#[test]
+fn the_detail_pane_gives_way_before_the_list_does() {
+    for width in 20..=93u16 {
+        let mut app = loaded();
+        let screen = ui::render_to_string(&mut app, width, 12, 0);
+        assert!(
+            !screen.contains("Detail"),
+            "the detail pane is still there at {width} columns"
+        );
+    }
+    let mut app = loaded();
+    assert!(ui::render_to_string(&mut app, 94, 12, 0).contains("Detail"));
+}
+
+/// Beyond what a row needs, the spare width goes to the pane that can use it.
+#[test]
+fn a_wide_terminal_gives_its_room_to_the_detail_pane() {
+    // Both wide enough for the list to have reached its full width, so any
+    // further room is genuinely spare.
+    let mut app = loaded();
+    let narrow = ui::render_to_string(&mut app, 124, 12, 0);
+    let wide = ui::render_to_string(&mut app, 170, 12, 0);
+
+    let pane_width = |screen: &str, title: &str| {
+        let line = screen
+            .lines()
+            .find(|l| l.contains(title))
+            .expect("the pane's title");
+        let at = line.find(title).expect("the title");
+        line[at..].chars().take_while(|c| *c != '╮').count()
+    };
+    assert_eq!(
+        pane_width(&narrow, " Services "),
+        pane_width(&wide, " Services "),
+        "the list grew instead of the detail pane"
+    );
+    assert!(
+        pane_width(&wide, " Detail ") > pane_width(&narrow, " Detail "),
+        "the detail pane did not take the extra room"
+    );
+}

@@ -1,7 +1,7 @@
  quarry  5 listening · 2 projects · 2 unhealthy                                    updated just now
 ────────────────────────────────────────────────────────────────────────────────────────────────────
 ╭ Services ──────────────────────────────────────────╮╭ Detail ────────────────────────────────────╮
-│ ▾ acme-web  main  acme/acme-web               ✕1  2││ ● acme-web                                 │
+│ ▾ acme-web  main  acme/acme-web             ✕1  2  ││ ● acme-web                                 │
 │▌ ●  3000 next-server               web  200   12ms ││   next-server · web · pid 13000            │
 │  ▲  3001 node worker.js            api  503  8.0ms ││                                            │
 │ ▾ no project        ╭──────────────────────────────────────────────────────╮                     │

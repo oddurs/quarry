@@ -1,11 +1,11 @@
  quarry  3 listening · 2 projects · 2 unhealthy                                                      updated just now
 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 ╭ Services ────────────────────────────────────────────────────────────╮╭ Detail ────────────────────────────────────╮
-│ ▸ acme-web  main  acme/acme-web                                 ✕1  2││ ● postgres                                 │
-│ ▾ no project                                                    ✕1  2││   postgres · db · pid 15432                │
+│ ▸ acme-web  main  acme/acme-web                               ✕1  2  ││ ● postgres                                 │
+│ ▾ no project                                                  ✕1  2  ││   postgres · db · pid 15432                │
 │▌ ●  5432 postgres                                     db  open 0.4ms ││                                            │
 │  ✕  6379 redis-server                              cache  no answer  ││ ADDRESS                                    │
-│ ▾ acme-api  feat/billing  acme/acme-api                             1││   http://localhost:5432                    │
+│ ▾ acme-api  feat/billing  acme/acme-api                           1  ││   http://localhost:5432                    │
 │  ●  8000 python3 uvicorn                             api  200   31ms ││   enter copies this, it cannot be opened   │
 │                                                                      ││                                            │
 │                                                                      ││ HEALTH                                     │

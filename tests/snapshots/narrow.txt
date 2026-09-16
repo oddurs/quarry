@@ -1,13 +1,13 @@
  quarry  5 listening                           updated just now
 ────────────────────────────────────────────────────────────────
 ╭ Services ────────────────────────────────────────────────────╮
-│ ▾ acme-web  main  acme/acme-web                         ✕1  2│
+│ ▾ acme-web  main  acme/acme-web                       ✕1  2  │
 │▌ ●  3000 next-server                         web  200   12ms │
 │  ▲  3001 node worker.js                      api  503  8.0ms │
-│ ▾ no project                                            ✕1  2│
+│ ▾ no project                                          ✕1  2  │
 │  ●  5432 postgres                             db  open 0.4ms │
 │  ✕  6379 redis-server                      cache  no answer  │
-│ ▾ acme-api  feat/billing  acme/acme-api                     1│
+│ ▾ acme-api  feat/billing  acme/acme-api                   1  │
 │  ●  8000 python3 uvicorn                     api  200   31ms │
 │                                                              │
 │                                                              │

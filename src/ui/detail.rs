@@ -39,11 +39,13 @@ pub(super) fn draw_detail(f: &mut Frame, app: &mut App, t: &Theme, area: Rect) {
     // Assembled section by section, in the order they are read. Where the URL
     // lands has to be known for the mouse, and it is simply how many lines came
     // before it.
+    // Two borders and the indent: what a line of this pane actually has.
+    let room = (area.width as usize).saturating_sub(4);
     let mut lines = detail_heading(s, t);
     let url_row = lines.len() + 1;
     lines.extend(detail_address(s, t));
-    lines.extend(detail_health(s, t));
-    lines.extend(detail_certificate(s, t, app.now));
+    lines.extend(detail_health(s, t, room));
+    lines.extend(detail_certificate(s, t, app.now, room));
     lines.extend(detail_listening(s, t));
     lines.extend(detail_folder(s, t));
     lines.extend(detail_container(s, t));
@@ -144,7 +146,7 @@ fn detail_address(s: &Server, t: &Theme) -> Vec<Line<'static>> {
     lines
 }
 
-fn detail_health(s: &Server, t: &Theme) -> Vec<Line<'static>> {
+fn detail_health(s: &Server, t: &Theme, room: usize) -> Vec<Line<'static>> {
     let (dot, colour) = (s.health.glyph(), t.health(&s.health));
     let mut lines = vec![
         section("Health", t),
@@ -163,10 +165,7 @@ fn detail_health(s: &Server, t: &Theme) -> Vec<Line<'static>> {
                 // Truncated: the pane is a fixed width and a long service
                 // name would otherwise wrap the sentence through the middle
                 // of a word, which reads as a rendering fault.
-                truncate(
-                    &format!("did not answer like {}", s.service_name()),
-                    DETAIL_WIDTH as usize - 4,
-                ),
+                truncate(&format!("did not answer like {}", s.service_name()), room),
                 Style::default().fg(t.client_error),
             ),
         ]));
@@ -195,7 +194,7 @@ fn detail_health(s: &Server, t: &Theme) -> Vec<Line<'static>> {
 /// What the certificate says. quarry never enforces any of it — verification
 /// stays off, because a self-signed local certificate is exactly the kind this
 /// is worth reporting on.
-fn detail_certificate(s: &Server, t: &Theme, now: u64) -> Vec<Line<'static>> {
+fn detail_certificate(s: &Server, t: &Theme, now: u64, room: usize) -> Vec<Line<'static>> {
     let Some(c) = &s.certificate else {
         return Vec::new();
     };
@@ -221,7 +220,7 @@ fn detail_certificate(s: &Server, t: &Theme, now: u64) -> Vec<Line<'static>> {
         lines.push(Line::from(vec![
             Span::raw("  "),
             Span::styled(
-                truncate(&trouble, DETAIL_WIDTH as usize - 4),
+                truncate(&trouble, room),
                 Style::default().fg(t.client_error),
             ),
         ]));
