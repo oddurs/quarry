@@ -178,7 +178,7 @@ fn applying_probe_results_is_cheap() {
     let each = time("one result, 2000 services", 2000, || {
         let (pid, port) = pids[i % pids.len()];
         i += 1;
-        app.apply_health(pid, port, Health::Closed, None);
+        app.apply_health(pid, port, Health::Closed, None, None);
     });
     // Two thousand of these arrive within a couple of seconds of every scan.
     // This used to rebuild every group on every result, which was 188µs each —
@@ -201,7 +201,13 @@ fn re_identifying_from_new_evidence_is_bounded() {
     let each = time("one result carrying a banner", 2000, || {
         let (pid, port) = keys[i % keys.len()];
         i += 1;
-        app.apply_health(pid, port, Health::Closed, Some(b"SSH-2.0-OpenSSH".to_vec()));
+        app.apply_health(
+            pid,
+            port,
+            Health::Closed,
+            Some(b"SSH-2.0-OpenSSH".to_vec()),
+            None,
+        );
     });
     // The cost is linear in the size of the signature table: 564 entries score
     // in about 60µs, and this budget leaves room for the table to roughly
